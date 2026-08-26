@@ -1,0 +1,18 @@
+{
+  "projects": {
+    "default": "propsure-d8f44"
+  },
+  "targets": {
+    "propsure-d8f44": {
+      "hosting": {
+        "app": [
+          "propsure-d8f44"
+        ],
+        "admin": [
+          "propsure-admin"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

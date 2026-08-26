@@ -1,0 +1,90 @@
+{
+  "project_info": {
+    "project_number": "971192083180",
+    "project_id": "propsure-d8f44",
+    "storage_bucket": "propsure-d8f44.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:971192083180:android:2751d1c407d20405d3fbc9",
+        "android_client_info": {
+          "package_name": "com.princedevlabs.propsure"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "971192083180-6rphcab6nioom533g9bgectp60k3cltk.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.princedevlabs.propsure",
+            "certificate_hash": "80d0b3374ac048ace39b5275a26d94a7c0627bf2"
+          }
+        },
+        {
+          "client_id": "971192083180-t29l2rhk4med8s8obfjeappt9ibln2o0.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA6Zc_7qnwaxOzw0-7DV3UI49UuFGujrI0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "971192083180-t29l2rhk4med8s8obfjeappt9ibln2o0.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "971192083180-h95ip26ts6gacvo40lukp9vbknjmn411.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.propsure.propsure"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:971192083180:android:3d516d783a1bbbb0d3fbc9",
+        "android_client_info": {
+          "package_name": "com.propsure.propsure"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "971192083180-t29l2rhk4med8s8obfjeappt9ibln2o0.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA6Zc_7qnwaxOzw0-7DV3UI49UuFGujrI0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "971192083180-t29l2rhk4med8s8obfjeappt9ibln2o0.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "971192083180-h95ip26ts6gacvo40lukp9vbknjmn411.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.propsure.propsure"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

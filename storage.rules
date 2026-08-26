@@ -1,0 +1,71 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    function isImageFile() {
+      return request.resource.contentType.matches('image/.*');
+    }
+
+    function isVideoFile() {
+      return request.resource.contentType.matches('video/.*');
+    }
+
+    function maxSize(mb) {
+      return request.resource.size <= mb * 1024 * 1024;
+    }
+
+    // ─── Profile photos ───────────────────────────────────────────────────
+
+    match /profile_photos/{userId}.jpg {
+      allow read: if true;
+      allow write: if isSignedIn()
+        && isOwner(userId)
+        && isImageFile()
+        && maxSize(5);
+    }
+
+    // ─── Listing images ───────────────────────────────────────────────────
+
+    match /listing_images/{listingId}/{fileName} {
+      allow read: if true;
+      allow write: if isSignedIn()
+        && isImageFile()
+        && maxSize(10);
+      allow delete: if isSignedIn();
+    }
+
+    // ─── Listing videos ───────────────────────────────────────────────────
+
+    match /listing_videos/{listingId}/{fileName} {
+      allow read: if true;
+      allow write: if isSignedIn()
+        && isVideoFile()
+        && maxSize(200); // 200MB max for video
+      allow delete: if isSignedIn();
+    }
+
+    // ─── Chat images ──────────────────────────────────────────────────────
+
+    match /chat_images/{chatId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn()
+        && isImageFile()
+        && maxSize(10);
+      allow delete: if isSignedIn();
+    }
+
+    // ─── Default deny ─────────────────────────────────────────────────────
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
