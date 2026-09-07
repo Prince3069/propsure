@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:image_picker/image_picker.dart';
 import '../data/models/user_model.dart';
 import '../core/constants/app_constants.dart';
 
@@ -43,7 +44,8 @@ class AuthService {
         codeAutoRetrievalTimeout: (String verificationId) {},
       );
     } catch (e) {
-      onError('Could not start phone verification. Check your connection and Firebase phone-auth setup.');
+      onError(
+          'Could not start phone verification. Check your connection and Firebase phone-auth setup.');
     }
   }
 
@@ -84,8 +86,10 @@ class AuthService {
       return AuthResult(success: true, uid: result.user?.uid);
     } on FirebaseAuthException catch (e) {
       String msg = 'Invalid code. Please try again.';
-      if (e.code == 'invalid-verification-code') msg = 'Wrong code. Please check and retry.';
-      if (e.code == 'session-expired')           msg = 'Code expired. Please request a new one.';
+      if (e.code == 'invalid-verification-code')
+        msg = 'Wrong code. Please check and retry.';
+      if (e.code == 'session-expired')
+        msg = 'Code expired. Please request a new one.';
       return AuthResult(success: false, error: msg);
     } catch (e) {
       return AuthResult(success: false, error: e.toString());
@@ -99,12 +103,14 @@ class AuthService {
   }) async {
     try {
       final result = await _auth.signInWithEmailAndPassword(
-        email: email.trim(), password: password);
+          email: email.trim(), password: password);
       return AuthResult(success: true, uid: result.user?.uid);
     } on FirebaseAuthException catch (e) {
       return AuthResult(success: false, error: _emailError(e));
     } catch (e) {
-      return AuthResult(success: false, error: 'An unexpected error occurred. Please try again.');
+      return AuthResult(
+          success: false,
+          error: 'An unexpected error occurred. Please try again.');
     }
   }
 
@@ -114,23 +120,22 @@ class AuthService {
   }) async {
     try {
       final result = await _auth.createUserWithEmailAndPassword(
-        email: email.trim(), password: password);
-      // Send email verification (optional but good practice)
+          email: email.trim(), password: password);
       await result.user?.sendEmailVerification();
       return AuthResult(success: true, uid: result.user?.uid);
     } on FirebaseAuthException catch (e) {
       return AuthResult(success: false, error: _emailError(e));
     } catch (e) {
-      return AuthResult(success: false, error: 'An unexpected error occurred. Please try again.');
+      return AuthResult(
+          success: false,
+          error: 'An unexpected error occurred. Please try again.');
     }
   }
 
   Future<void> sendPasswordReset({required String email}) async {
     try {
       await _auth.sendPasswordResetEmail(email: email.trim());
-    } catch (_) {
-      // Silently fail — don't reveal if email exists or not
-    }
+    } catch (_) {}
   }
 
   String _emailError(FirebaseAuthException e) {
@@ -181,12 +186,12 @@ class AuthService {
     required String name,
     String? email,
     required String role,
-    File? avatarFile,
+    XFile? avatarXFile, // ← Changed from File to XFile
   }) async {
     String? photoUrl;
-    if (avatarFile != null) photoUrl = await _uploadAvatar(uid, avatarFile);
+    if (avatarXFile != null)
+      photoUrl = await _uploadAvatarFromXFile(uid, avatarXFile);
 
-    // Get phone or email from Firebase Auth
     final firebaseUser = _auth.currentUser;
     final phone = firebaseUser?.phoneNumber ?? '';
     final resolvedEmail = email ?? firebaseUser?.email ?? '';
@@ -210,16 +215,16 @@ class AuthService {
     String? email,
     String? bio,
     String? agencyName,
-    File? avatarFile,
+    XFile? avatarXFile, // ← Changed from File to XFile
   }) async {
     final updates = <String, dynamic>{};
-    if (name != null)       updates['name'] = name;
-    if (email != null)      updates['email'] = email;
-    if (bio != null)        updates['bio'] = bio;
+    if (name != null) updates['name'] = name;
+    if (email != null) updates['email'] = email;
+    if (bio != null) updates['bio'] = bio;
     if (agencyName != null) updates['agencyName'] = agencyName;
 
-    if (avatarFile != null) {
-      final photoUrl = await _uploadAvatar(uid, avatarFile);
+    if (avatarXFile != null) {
+      final photoUrl = await _uploadAvatarFromXFile(uid, avatarXFile);
       updates['profilePhoto'] = photoUrl;
     }
 
@@ -228,7 +233,10 @@ class AuthService {
   }
 
   Future<void> updateFCMToken(String uid, String token) async {
-    await _db.collection(AppConstants.colUsers).doc(uid).update({'fcmToken': token});
+    await _db
+        .collection(AppConstants.colUsers)
+        .doc(uid)
+        .update({'fcmToken': token});
   }
 
   Future<void> updateLastSeen(String uid) async {
@@ -240,10 +248,11 @@ class AuthService {
 
   Future<void> signOut() async => await _auth.signOut();
 
-  // ── Avatar upload ──────────────────────────────────────────────────────────
-  Future<String> _uploadAvatar(String uid, File file) async {
-    final compressed = await FlutterImageCompress.compressWithFile(
-      file.path, minWidth: 400, minHeight: 400, quality: 75);
+  // ── Avatar upload from XFile ──────────────────────────────────────────────
+  Future<String> _uploadAvatarFromXFile(String uid, XFile xFile) async {
+    final file = File(xFile.path);
+    final compressed = await FlutterImageCompress.compressWithFile(file.path,
+        minWidth: 400, minHeight: 400, quality: 75);
     final ref = _storage.ref('${AppConstants.pathUserAvatars}/$uid.jpg');
     if (compressed != null) {
       await ref.putData(compressed);

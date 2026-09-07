@@ -29,9 +29,9 @@ class _UploadListingScreenState extends ConsumerState<UploadListingScreen> {
   int _step = 0;
 
   // ── Photos step ─────────────────────────────────────────────
-  List<File> _images = [];
-  File? _videoFile;
-  File? _video360File;
+  List<XFile> _images = [];
+  XFile? _videoFile;
+  XFile? _video360File;
 
   // ── Location step ────────────────────────────────────────────
   String? _area;
@@ -64,19 +64,23 @@ class _UploadListingScreenState extends ConsumerState<UploadListingScreen> {
     super.dispose();
   }
 
-  // ── Image picker ──────────────────────────────────────────────
+  // ── Image picker using Photo Picker (no permissions needed) ──
   Future<void> _pickImages() async {
     final picker = ImagePicker();
-    final picked = await picker.pickMultiImage(imageQuality: 75);
+    final picked = await picker.pickMultiImage(
+      imageQuality: 75,
+    );
     if (picked.isNotEmpty) {
-      setState(() => _images.addAll(picked.map((x) => File(x.path))));
+      setState(() => _images.addAll(picked));
     }
   }
 
   Future<void> _pickVideo() async {
     final picker = ImagePicker();
-    final picked = await picker.pickVideo(source: ImageSource.gallery);
-    if (picked != null) setState(() => _videoFile = File(picked.path));
+    final picked = await picker.pickVideo(
+      source: ImageSource.gallery,
+    );
+    if (picked != null) setState(() => _videoFile = picked);
   }
 
   // ── Submit ────────────────────────────────────────────────────
@@ -140,7 +144,6 @@ class _UploadListingScreenState extends ConsumerState<UploadListingScreen> {
         builder: (_) => _SuccessDialog(listingId: id),
       );
     } else {
-      // Show the REAL error so we know exactly what went wrong
       showDialog(
         context: context,
         builder: (_) => AlertDialog(
@@ -167,8 +170,6 @@ class _UploadListingScreenState extends ConsumerState<UploadListingScreen> {
   }
 
   Future<PropertyLocation> _buildLocation() async {
-    // Do not use the uploader's current GPS as the property's coordinate.
-    // Until an exact pin picker is added, use the selected Abuja area center.
     const areaCenters = <String, List<double>>{
       'Maitama': [9.0820, 7.4836],
       'Wuse 2': [9.0700, 7.4850],
@@ -223,7 +224,6 @@ class _UploadListingScreenState extends ConsumerState<UploadListingScreen> {
   }
 
   void _advanceStep() {
-    // Validate before advancing
     if (_step == 0 && _images.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Add at least 1 photo to continue'),
@@ -495,8 +495,8 @@ class _BottomBar extends StatelessWidget {
 
 // ─── STEP 0: PHOTOS ───────────────────────────────────────────────────────────
 class _StepPhotos extends StatelessWidget {
-  final List<File> images;
-  final File? videoFile, video360File;
+  final List<XFile> images;
+  final XFile? videoFile, video360File;
   final VoidCallback onPickImages, onPickVideo;
   final void Function(int) onRemoveImage;
   final VoidCallback onRemoveVideo, onRemove360;
@@ -515,7 +515,7 @@ class _StepPhotos extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(padding: const EdgeInsets.all(16), children: [
-      // ── WhatsApp shortcut at the TOP (before filling anything) ───────────
+      // ── WhatsApp shortcut ─────────────────────────────────────────────
       GestureDetector(
         onTap: () async {
           final msg = '🏡 *NEW PROPERTY LISTING REQUEST*\n'
@@ -625,10 +625,12 @@ class _StepPhotos extends StatelessWidget {
           return Stack(children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(10),
-              child: Image.file(images[i],
-                  fit: BoxFit.cover,
-                  width: double.infinity,
-                  height: double.infinity),
+              child: Image.file(
+                File(images[i].path),
+                fit: BoxFit.cover,
+                width: double.infinity,
+                height: double.infinity,
+              ),
             ),
             if (i == 0)
               Positioned(
@@ -734,7 +736,6 @@ class _StepLocation extends StatelessWidget {
         onChanged: onCityChanged,
       ),
       const SizedBox(height: 16),
-
       _sectionLabel('AREA / NEIGHBOURHOOD'),
       _PropsureDropdown<String>(
         value: area,
@@ -744,7 +745,6 @@ class _StepLocation extends StatelessWidget {
         onChanged: onAreaChanged,
       ),
       const SizedBox(height: 16),
-
       _sectionLabel('FULL ADDRESS (Optional)'),
       TextField(
         controller: addressCtrl,
@@ -755,8 +755,6 @@ class _StepLocation extends StatelessWidget {
         ),
       ),
       const SizedBox(height: 16),
-
-      // ── Exact property pin ───────────────────────────────────────
       _PropertyPinPicker(
         area: area,
         selectedPin: selectedPin,
@@ -776,6 +774,7 @@ class _StepLocation extends StatelessWidget {
       );
 }
 
+// ─── PROPERTY PIN PICKER ──────────────────────────────────────────────────────
 class _PropertyPinPicker extends StatelessWidget {
   final String? area;
   final LatLng? selectedPin;
@@ -924,7 +923,6 @@ class _StepDetails extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(padding: const EdgeInsets.all(16), children: [
-      // Title
       TextField(
         controller: titleCtrl,
         textCapitalization: TextCapitalization.sentences,
@@ -935,8 +933,6 @@ class _StepDetails extends StatelessWidget {
         ),
       ),
       const SizedBox(height: 14),
-
-      // Description
       TextField(
         controller: descCtrl,
         maxLines: 4,
@@ -952,8 +948,6 @@ class _StepDetails extends StatelessWidget {
         ),
       ),
       const SizedBox(height: 14),
-
-      // Price
       TextField(
         controller: priceCtrl,
         keyboardType: TextInputType.number,
@@ -965,8 +959,6 @@ class _StepDetails extends StatelessWidget {
         ),
       ),
       const SizedBox(height: 14),
-
-      // Category dropdown — CarPlaza style
       _PropsureDropdown<String>(
         value: category,
         items: _categories,
@@ -976,8 +968,6 @@ class _StepDetails extends StatelessWidget {
         onChanged: onCategoryChanged,
       ),
       const SizedBox(height: 14),
-
-      // Property type dropdown — CarPlaza style
       _PropsureDropdown<String>(
         value: propertyType,
         items: _propertyTypes,
@@ -987,8 +977,6 @@ class _StepDetails extends StatelessWidget {
         onChanged: onPropertyTypeChanged,
       ),
       const SizedBox(height: 20),
-
-      // Rooms
       Text('ROOMS',
           style: const TextStyle(
               fontSize: 11,
@@ -1022,8 +1010,6 @@ class _StepDetails extends StatelessWidget {
         )),
       ]),
       const SizedBox(height: 20),
-
-      // Extras
       Row(children: [
         Expanded(
             child: CheckboxListTile(
@@ -1053,8 +1039,6 @@ class _StepDetails extends StatelessWidget {
         activeColor: AppColors.primary,
       ),
       const SizedBox(height: 16),
-
-      // Amenities
       Text('AMENITIES',
           style: const TextStyle(
               fontSize: 11,
@@ -1158,8 +1142,6 @@ class _StepReview extends StatelessWidget {
         ),
       ),
       const SizedBox(height: 16),
-
-      // ── Info box ─────────────────────────────────────────────
       Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
@@ -1281,7 +1263,7 @@ class _RoomCounter extends StatelessWidget {
   }
 }
 
-// ─── PROPSURE DROPDOWN — matches CarPlaza style exactly ──────────────────────
+// ─── PROPSURE DROPDOWN ──────────────────────────────────────────────────────
 class _PropsureDropdown<T> extends StatelessWidget {
   final T? value;
   final List<T> items;

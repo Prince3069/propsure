@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 enum SortOrder { newest, oldest, priceAsc, priceDesc, featured }
+
 enum ListingCategory { forRent, forSale, shortStay }
 
 class PropertyLocation {

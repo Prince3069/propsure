@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:geoflutterfire_plus/geoflutterfire_plus.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import '../models/listing_model.dart';
 import '../../core/constants/app_constants.dart';
@@ -136,7 +138,7 @@ class ListingRepository {
     });
   }
 
-  // ── Create listing ────────────────────────────────────────────────────────
+  // ── Create listing with XFile support ────────────────────────────────────
   Future<String> createListing({
     required String agentId,
     required String agentName,
@@ -151,7 +153,7 @@ class ListingRepository {
     required int bedrooms,
     required int bathrooms,
     required int toilets,
-    required List<String> localImagePaths,
+    required List<String> localImagePaths, // XFile paths
     String? localVideoPath,
     String? local360VideoPath,
     List<String> amenities = const [],
@@ -175,7 +177,6 @@ class ListingRepository {
         imageUrls.add(url);
         onProgress?.call((i + 1) / totalMedia);
       } catch (e) {
-        // Re-throw with clearer message so user sees what went wrong
         throw Exception(
             'Failed to upload photo ${i + 1} of ${localImagePaths.length}. '
             'Check your internet connection and try again.\n\nDetail: $e');
@@ -225,7 +226,6 @@ class ListingRepository {
     try {
       final batch = _db.batch();
       batch.set(_col.doc(id), listing.toMap());
-      // Increment agent's listing count
       batch.update(
         _db.collection(AppConstants.colUsers).doc(agentId),
         {'totalListings': FieldValue.increment(1)},
@@ -238,6 +238,57 @@ class ListingRepository {
 
     onProgress?.call(1.0);
     return id;
+  }
+
+  // ─── UPLOAD A SINGLE IMAGE (NEW - FOR EDIT) ─────────────────────────────
+  Future<String> uploadImage(String path, String listingId, int index) async {
+    final file = File(path);
+    if (!await file.exists()) {
+      throw Exception('Photo file missing from device storage.');
+    }
+
+    final storageRef =
+        _storage.ref('listings/images/$listingId/img_$index.jpg');
+
+    TaskSnapshot snapshot;
+
+    try {
+      final compressed = await FlutterImageCompress.compressWithFile(
+        path,
+        minWidth: 1080,
+        minHeight: 810,
+        quality: 82,
+      );
+      if (compressed != null && compressed.isNotEmpty) {
+        snapshot = await storageRef.putData(
+          compressed,
+          SettableMetadata(contentType: 'image/jpeg'),
+        );
+      } else {
+        snapshot = await storageRef.putFile(
+          file,
+          SettableMetadata(contentType: 'image/jpeg'),
+        );
+      }
+    } catch (_) {
+      snapshot = await storageRef.putFile(
+        file,
+        SettableMetadata(contentType: 'image/jpeg'),
+      );
+    }
+
+    return await snapshot.ref.getDownloadURL();
+  }
+
+  // ─── DELETE AN IMAGE FROM STORAGE (NEW - FOR EDIT) ──────────────────────
+  Future<void> deleteImage(String imageUrl) async {
+    try {
+      final ref = _storage.refFromURL(imageUrl);
+      await ref.delete();
+    } catch (e) {
+      // Image might already be deleted or URL invalid - ignore
+      debugPrint('Could not delete image: $e');
+    }
   }
 
   // ── Update / Delete ───────────────────────────────────────────────────────
@@ -282,9 +333,8 @@ class ListingRepository {
     await _col.doc(id).update({'viewCount': FieldValue.increment(1)});
   }
 
-  // ── Upload helpers ────────────────────────────────────────────────────────
+  // ── Upload helpers (XFile compatible) ────────────────────────────────────
   Future<String> _uploadImage(String path, String listingId, int index) async {
-    // Verify the file actually exists on the device
     final file = File(path);
     if (!await file.exists()) {
       throw Exception('Photo file missing from device storage. '
@@ -296,7 +346,6 @@ class ListingRepository {
 
     TaskSnapshot snapshot;
 
-    // Try compressed upload first, fall back to raw if it fails
     try {
       final compressed = await FlutterImageCompress.compressWithFile(
         path,
@@ -310,21 +359,18 @@ class ListingRepository {
           SettableMetadata(contentType: 'image/jpeg'),
         );
       } else {
-        // Compression returned null — upload original
         snapshot = await storageRef.putFile(
           file,
           SettableMetadata(contentType: 'image/jpeg'),
         );
       }
     } catch (_) {
-      // Compression crashed — upload original file directly
       snapshot = await storageRef.putFile(
         file,
         SettableMetadata(contentType: 'image/jpeg'),
       );
     }
 
-    // Get download URL from the completed upload snapshot
     return await snapshot.ref.getDownloadURL();
   }
 

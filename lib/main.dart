@@ -36,7 +36,7 @@ class PropsureApp extends ConsumerWidget {
     return MaterialApp.router(
       title: 'Propsure',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.light,
+      theme: AppTheme.light(), // Fixed: Added () to call the function
       themeMode: ThemeMode.light,
       routerConfig: router,
     );

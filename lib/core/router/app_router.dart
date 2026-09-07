@@ -12,6 +12,7 @@ import '../../presentation/screens/chat/chat_screen.dart';
 import '../../presentation/screens/profile/profile_screen.dart';
 import '../../presentation/screens/profile/edit_profile_screen.dart';
 import '../../presentation/screens/listings/listing_detail_screen.dart';
+import '../../presentation/screens/listings/edit_listing_screen.dart'; // NEW
 import '../../presentation/screens/listings/upload_listing_screen.dart';
 import '../../presentation/screens/bookings/bookings_screen.dart';
 import '../../presentation/screens/bookings/booking_detail_screen.dart';
@@ -56,6 +57,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
       const authRoutes = [
         '/listing/upload',
+        '/listing/edit', // NEW - edit route needs auth
         '/messages',
         '/profile',
         '/saved',
@@ -111,6 +113,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/listing/upload',
         builder: (_, __) => const UploadListingScreen(),
       ),
+      // ─── EDIT LISTING ROUTE (NEW) ───
+      GoRoute(
+        path: '/listing/edit/:listingId',
+        name: 'edit_listing',
+        builder: (_, state) {
+          final listingId = state.pathParameters['listingId']!;
+          return EditListingScreen(listingId: listingId);
+        },
+      ),
+      // Keep the old edit route for backward compatibility
       GoRoute(
         path: '/listing/:id/edit',
         builder: (_, state) =>

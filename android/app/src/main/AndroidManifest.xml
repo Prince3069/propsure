@@ -4,10 +4,8 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32"/>
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
+    <!-- REMOVED: READ_EXTERNAL_STORAGE, READ_MEDIA_IMAGES, READ_MEDIA_VIDEO -->
+    <!-- Android Photo Picker is used instead — no storage permissions needed for Android 13+ -->
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
@@ -16,7 +14,9 @@
     <application
         android:label="Propsure"
         android:name="${applicationName}"
-        android:icon="@mipmap/launcher_icon">
+        android:icon="@mipmap/launcher_icon"
+        android:requestLegacyExternalStorage="true"
+        android:usesCleartextTraffic="true">
 
         <!-- Google Maps API Key -->
         <meta-data

@@ -8,7 +8,7 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// Load key.properties from the android/ folder (corrected path)
+// Load key.properties from the android/ folder
 val keystorePropertiesFile = rootProject.file("key.properties")
 val keystoreProperties = Properties()
 if (keystorePropertiesFile.exists()) {
@@ -34,7 +34,6 @@ android {
             keyAlias      = keystoreProperties["keyAlias"]      as? String
             keyPassword   = keystoreProperties["keyPassword"]   as? String
             storeFile     = keystoreProperties["storeFile"]?.let {
-                // storeFile is "propsure-release.jks" (relative to android/ folder)
                 rootProject.file(it.toString())
             }
             storePassword = keystoreProperties["storePassword"] as? String
@@ -45,8 +44,8 @@ android {
         applicationId = "com.princedevlabs.propsure"
         minSdk        = 21
         targetSdk     = 36
-        versionCode   = 1
-        versionName   = "1.0.0"
+        versionCode   = 4   // ← Changed from 3 to 4
+        versionName   = "1.0.3"   // ← Changed from 1.0.2 to 1.0.3
     }
 
     buildTypes {

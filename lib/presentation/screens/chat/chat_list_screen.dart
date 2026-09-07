@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../../../core/constants/app_theme.dart';
 import '../../../core/widgets/common_widgets.dart';
@@ -26,10 +25,7 @@ class ChatListScreen extends ConsumerWidget {
       appBar: AppBar(
         title: Text(
           'Messages',
-          style: GoogleFonts.syne(
-            fontSize: 20,
-            fontWeight: FontWeight.w800,
-          ),
+          style: Theme.of(context).textTheme.headlineLarge,
         ),
         actions: [
           IconButton(
@@ -128,10 +124,7 @@ class _GuestView extends StatelessWidget {
       appBar: AppBar(
         title: Text(
           'Messages',
-          style: GoogleFonts.syne(
-            fontSize: 20,
-            fontWeight: FontWeight.w800,
-          ),
+          style: Theme.of(context).textTheme.headlineLarge,
         ),
       ),
       body: Center(
