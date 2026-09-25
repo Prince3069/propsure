@@ -43,6 +43,8 @@ class AppConstants {
   static const String bookingRejected = 'rejected';
 
   // Listing categories
+  // ── DEPRECATED: display-only labels. Never persist these to Firestore. ──
+  // Use ListingCategory.values for anything that touches the database.
   static const List<String> listingCategories = [
     'For Rent',
     'For Sale',

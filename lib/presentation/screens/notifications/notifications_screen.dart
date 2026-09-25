@@ -67,7 +67,7 @@ class NotificationsScreen extends ConsumerWidget {
     final uid = ref.watch(currentUserIdProvider);
     if (uid == null) {
       return Scaffold(
-        appBar: AppBar(title: Text('Notifications', style: GoogleFonts.syne(fontWeight: FontWeight.w700))),
+        appBar: AppBar(title: Text('Notifications', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700))),
         body: EmptyState(
           icon: Icons.notifications_none_rounded,
           title: 'Sign in to see notifications',
@@ -89,7 +89,7 @@ class NotificationsScreen extends ConsumerWidget {
           data: (notifs) {
             final unread = notifs.where((n) => !n.isRead).length;
             return Row(children: [
-              Text('Notifications', style: GoogleFonts.syne(fontWeight: FontWeight.w700)),
+              Text('Notifications', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
               if (unread > 0) ...[
                 const SizedBox(width: 8),
                 Container(
@@ -100,8 +100,8 @@ class NotificationsScreen extends ConsumerWidget {
               ],
             ]);
           },
-          loading: () => Text('Notifications', style: GoogleFonts.syne(fontWeight: FontWeight.w700)),
-          error:   (_,__) => Text('Notifications', style: GoogleFonts.syne(fontWeight: FontWeight.w700)),
+          loading: () => Text('Notifications', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
+          error:   (_,__) => Text('Notifications', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
         ),
         actions: [
           notifsAsync.maybeWhen(
@@ -144,7 +144,14 @@ class NotificationsScreen extends ConsumerWidget {
           separatorBuilder: (_, __) => const SizedBox(height: 2),
           itemBuilder: (_, __) => const _NotifSkeleton(),
         ),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        // Friendly failure state instead of the raw exception.
+        error: (e, _) => const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text('Couldn\'t load your notifications right now.',
+                style: TextStyle(fontSize: 13, color: AppColors.text3)),
+          ),
+        ),
       ),
     );
   }

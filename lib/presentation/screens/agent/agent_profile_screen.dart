@@ -22,8 +22,24 @@ class AgentProfileScreen extends ConsumerWidget {
       body: agentAsync.when(
         loading: () =>
             const Scaffold(body: Center(child: CircularProgressIndicator())),
-        error: (e, _) =>
-            Scaffold(appBar: AppBar(), body: Center(child: Text('$e'))),
+        // Friendly failure state instead of dumping the raw exception —
+        // same fix as the home screen's "Recently added" section and
+        // search screen's error state earlier in this pass.
+        error: (e, _) => Scaffold(
+          appBar: AppBar(),
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.error_outline_rounded, size: 32, color: AppColors.text3),
+                const SizedBox(height: 10),
+                const Text('Couldn\'t load this agent\'s profile right now.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 13, color: AppColors.text2)),
+              ]),
+            ),
+          ),
+        ),
         data: (agent) {
           // ── Guard: agent not found ────────────────────────────────
           if (agent == null) {
@@ -117,7 +133,7 @@ class AgentProfileScreen extends ConsumerWidget {
 
                       // Name
                       Text(agent.name,
-                          style: GoogleFonts.syne(
+                          style: GoogleFonts.plusJakartaSans(
                               fontSize: 20,
                               fontWeight: FontWeight.w800,
                               color: Colors.white)),
@@ -283,8 +299,17 @@ class AgentProfileScreen extends ConsumerWidget {
                   itemBuilder: (_, __) => const SkeletonCard(),
                 ),
               ),
-              error: (e, _) =>
-                  SliverToBoxAdapter(child: Center(child: Text('$e'))),
+              // Same friendly-failure fix — this section's listings failed
+              // to load shouldn't dump a raw exception either.
+              error: (e, _) => SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Center(
+                    child: Text('Couldn\'t load this agent\'s listings.',
+                        style: const TextStyle(fontSize: 13, color: AppColors.text3)),
+                  ),
+                ),
+              ),
               data: (listings) {
                 if (listings.isEmpty) {
                   return SliverToBoxAdapter(
@@ -344,7 +369,7 @@ class AgentProfileScreen extends ConsumerWidget {
           const SizedBox(height: 16),
           Text('Report Agent',
               style:
-                  GoogleFonts.syne(fontSize: 16, fontWeight: FontWeight.w700)),
+                  GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w700)),
           const SizedBox(height: 14),
           ...[
             'Fake agent / scam',
@@ -408,7 +433,7 @@ class _AgentStat extends StatelessWidget {
   Widget build(BuildContext context) => Expanded(
         child: Column(children: [
           Text(value,
-              style: GoogleFonts.syne(
+              style: GoogleFonts.plusJakartaSans(
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
                   color: Colors.white)),

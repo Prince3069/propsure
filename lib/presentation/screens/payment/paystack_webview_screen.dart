@@ -138,7 +138,7 @@ class _PaystackWebviewScreenState
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           const Icon(Icons.error_outline_rounded, size: 48, color: AppColors.error),
           const SizedBox(height: 12),
-          Text('Payment Failed', style: GoogleFonts.syne(fontSize: 18, fontWeight: FontWeight.w800)),
+          Text('Payment Failed', style: GoogleFonts.plusJakartaSans(fontSize: 18, fontWeight: FontWeight.w800)),
           const SizedBox(height: 8),
           Text(message, textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, color: AppColors.text2)),
           const SizedBox(height: 20),
@@ -160,7 +160,7 @@ class _PaystackWebviewScreenState
     return Scaffold(
       appBar: AppBar(
         title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Secure Checkout', style: GoogleFonts.syne(fontSize: 15, fontWeight: FontWeight.w700)),
+          Text('Secure Checkout', style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w700)),
           Row(children: [
             const Icon(Icons.lock_rounded, size: 10, color: AppColors.success),
             const SizedBox(width: 3),
@@ -233,7 +233,7 @@ class _ConfirmCancelSheet extends StatelessWidget {
     child: Column(mainAxisSize: MainAxisSize.min, children: [
       Container(width: 36, height: 4, decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2))),
       const SizedBox(height: 20),
-      Text('Cancel payment?', style: GoogleFonts.syne(fontSize: 18, fontWeight: FontWeight.w800)),
+      Text('Cancel payment?', style: GoogleFonts.plusJakartaSans(fontSize: 18, fontWeight: FontWeight.w800)),
       const SizedBox(height: 8),
       const Text('Your payment has not been processed yet. Are you sure you want to leave?',
         textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: AppColors.text2)),
@@ -279,7 +279,7 @@ class _SuccessDialog extends StatelessWidget {
     content: Column(mainAxisSize: MainAxisSize.min, children: [
       Text(_emoji, style: const TextStyle(fontSize: 52)),
       const SizedBox(height: 12),
-      Text('Payment Successful!', style: GoogleFonts.syne(fontSize: 18, fontWeight: FontWeight.w800)),
+      Text('Payment Successful!', style: GoogleFonts.plusJakartaSans(fontSize: 18, fontWeight: FontWeight.w800)),
       const SizedBox(height: 8),
       Text(_message, textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, color: AppColors.text2)),
       const SizedBox(height: 20),
@@ -288,7 +288,7 @@ class _SuccessDialog extends StatelessWidget {
           Navigator.pop(context); // Close dialog
           context.go('/home');    // Return home
         },
-        child: Text('Done', style: GoogleFonts.syne(fontWeight: FontWeight.w800)),
+        child: Text('Done', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800)),
       )),
     ]),
   );

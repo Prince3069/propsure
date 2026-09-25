@@ -1,8 +1,31 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/constants/listing_category.dart';
+
+export '../../core/constants/listing_category.dart' show ListingCategory;
 
 enum SortOrder { newest, oldest, priceAsc, priceDesc, featured }
 
-enum ListingCategory { forRent, forSale, shortStay }
+/// verification_status lifecycle for both users and listings.
+/// Set ONLY by trusted backend code (Cloud Functions with an admin/reviewer
+/// custom claim) — never write these client-side. See Firestore rules.
+enum VerificationStatus { none, pending, approved, rejected, expired }
+
+VerificationStatus verificationStatusFromString(String? raw) {
+  switch (raw) {
+    case 'pending':
+      return VerificationStatus.pending;
+    case 'approved':
+      return VerificationStatus.approved;
+    case 'rejected':
+      return VerificationStatus.rejected;
+    case 'expired':
+      return VerificationStatus.expired;
+    default:
+      return VerificationStatus.none;
+  }
+}
+
+String verificationStatusToString(VerificationStatus s) => s.name;
 
 class PropertyLocation {
   final double latitude;
@@ -15,6 +38,13 @@ class PropertyLocation {
   final String street;
   final String fullAddress;
   final Map<String, dynamic>? geoData;
+  // 'exact' | 'street' | 'area' | 'approximate'. Set to 'approximate'
+  // whenever the coordinates came from an area-center fallback rather than
+  // a pin the user actually placed — the review flagged that the app was
+  // presenting area-center coordinates as if they were the precise
+  // property location. Defaults to 'exact' for backward compatibility with
+  // documents written before this field existed (most were pin-selected).
+  final String locationPrecision;
 
   const PropertyLocation({
     required this.latitude,
@@ -27,6 +57,7 @@ class PropertyLocation {
     this.street = '',
     required this.fullAddress,
     this.geoData,
+    this.locationPrecision = 'exact',
   });
 
   factory PropertyLocation.fromMap(Map<String, dynamic> map) {
@@ -41,6 +72,7 @@ class PropertyLocation {
       street: map['street'] ?? '',
       fullAddress: map['fullAddress'] ?? '',
       geoData: map['geoData'],
+      locationPrecision: map['locationPrecision'] as String? ?? 'exact',
     );
   }
 
@@ -55,6 +87,7 @@ class PropertyLocation {
         'street': street,
         'fullAddress': fullAddress,
         'geoData': geoData,
+        'locationPrecision': locationPrecision,
       };
 }
 
@@ -78,7 +111,19 @@ class ListingModel {
   final bool isVerified;
   final bool isFeatured;
   final String status;
-  final String category; // for_rent, for_sale, short_stay
+  final String category; // canonical value, e.g. for_rent, for_sale, short_stay, commercial
+
+  // ── Trust / verification metadata (2.2 of the review) ──
+  // `isVerified` above is kept for backward-compatible reads/queries, but is
+  // now DERIVED from verificationStatus rather than an independent flag.
+  // These fields are written ONLY by Cloud Functions — enforced in
+  // firestore.rules — never by the Flutter client.
+  final VerificationStatus verificationStatus;
+  final String? verificationType; // e.g. 'ownership', 'agent_authority'
+  final DateTime? verifiedAt;
+  final String? verifiedBy; // reviewer uid
+  final DateTime? verificationExpiresAt;
+
   final DateTime createdAt;
   final DateTime? updatedAt;
   final DateTime? expiresAt;
@@ -111,6 +156,11 @@ class ListingModel {
     this.isFeatured = false,
     this.status = 'active',
     this.category = 'for_rent',
+    this.verificationStatus = VerificationStatus.none,
+    this.verificationType,
+    this.verifiedAt,
+    this.verifiedBy,
+    this.verificationExpiresAt,
     required this.createdAt,
     this.updatedAt,
     this.expiresAt,
@@ -143,10 +193,27 @@ class ListingModel {
       agentName: data['agentName'] ?? '',
       agentPhone: data['agentPhone'] ?? '',
       agentPhoto: data['agentPhoto'],
-      isVerified: data['isVerified'] ?? false,
+      // Legacy documents may still contain "For Rent" / "Short Stay" etc.
+      // Normalize on every read so old data keeps working while the
+      // one-time migration script (see /migrations) catches up.
+      category: ListingCategory.fromAny(data['category'] as String?).value,
+      verificationStatus:
+          verificationStatusFromString(data['verificationStatus'] as String?),
+      verificationType: data['verificationType'] as String?,
+      verifiedAt: (data['verifiedAt'] as Timestamp?)?.toDate(),
+      verifiedBy: data['verifiedBy'] as String?,
+      verificationExpiresAt:
+          (data['verificationExpiresAt'] as Timestamp?)?.toDate(),
+      // Derived: only "approved" and not expired counts as verified.
+      isVerified: verificationStatusFromString(
+                  data['verificationStatus'] as String?) ==
+              VerificationStatus.approved &&
+          !((data['verificationExpiresAt'] as Timestamp?)
+                  ?.toDate()
+                  .isBefore(DateTime.now()) ??
+              false),
       isFeatured: data['isFeatured'] ?? false,
       status: data['status'] ?? 'active',
-      category: data['category'] ?? 'for_rent',
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
       expiresAt: (data['expiresAt'] as Timestamp?)?.toDate(),
@@ -181,7 +248,16 @@ class ListingModel {
         'isVerified': isVerified,
         'isFeatured': isFeatured,
         'status': status,
-        'category': category,
+        // Defensive normalization: even if a caller somehow passes a legacy
+        // label, only the canonical machine value is ever persisted.
+        'category': ListingCategory.fromAny(category).value,
+        'verificationStatus': verificationStatusToString(verificationStatus),
+        'verificationType': verificationType,
+        'verifiedAt': verifiedAt != null ? Timestamp.fromDate(verifiedAt!) : null,
+        'verifiedBy': verifiedBy,
+        'verificationExpiresAt': verificationExpiresAt != null
+            ? Timestamp.fromDate(verificationExpiresAt!)
+            : null,
         'createdAt': Timestamp.fromDate(createdAt),
         'updatedAt': updatedAt != null ? Timestamp.fromDate(updatedAt!) : null,
         'expiresAt': expiresAt != null ? Timestamp.fromDate(expiresAt!) : null,
@@ -203,32 +279,38 @@ class ListingModel {
     return '₦${price.toInt()}';
   }
 
-  String get formattedPriceWithPeriod {
-    final suffix = category == 'short_stay' ? '/night' : '/yr';
-    return '${formattedPrice}$suffix';
-  }
+  ListingCategory get categoryEnum => ListingCategory.fromAny(category);
+
+  String get formattedPriceWithPeriod =>
+      '$formattedPrice${categoryEnum.priceSuffix}';
 
   bool get isActive => status == 'active';
 }
 
+/// A single filter model. The old version had BOTH `query` and `searchQuery`
+/// (the repository read `filter.query`, screens wrote either one), and
+/// `copyWith()` silently dropped whichever text-search field it carried —
+/// editing one filter could wipe the user's current search text. There is
+/// now exactly one text-search field: `query`. There was also a dead
+/// `state` field that was accepted by the model but never applied by the
+/// repository query — removed per the review's "apply it or remove it"
+/// guidance, since nothing in the app currently supports state-level
+/// filtering (Propsure is Abuja-only for now).
 class ListingFilter {
-  final String? query; // text search: matches title, area, propertyType
+  final String? query; // text search: matches title, area, propertyType, description
   final String? area;
-  final String? state;
   final String? propertyType;
-  final String? category;
+  final String? category; // canonical ListingCategory.value, or null = any
   final int? minBedrooms;
   final double? minPrice;
   final double? maxPrice;
   final bool? isVerified;
   final bool? isFeatured;
-  final String? searchQuery;
   final SortOrder sortOrder;
 
   const ListingFilter({
     this.query,
     this.area,
-    this.state,
     this.propertyType,
     this.category,
     this.minBedrooms,
@@ -236,14 +318,16 @@ class ListingFilter {
     this.maxPrice,
     this.isVerified,
     this.isFeatured,
-    this.searchQuery,
     this.sortOrder = SortOrder.newest,
   });
 
-  ListingFilter copyWith({
+  /// Normalizes whatever category string comes in (route slug, legacy
+  /// label, canonical value) to the canonical value before it's stored on
+  /// the filter, so the repository query is always exact-matching against
+  /// what's actually in Firestore.
+  factory ListingFilter.withCategory({
     String? query,
     String? area,
-    String? state,
     String? propertyType,
     String? category,
     int? minBedrooms,
@@ -251,54 +335,92 @@ class ListingFilter {
     double? maxPrice,
     bool? isVerified,
     bool? isFeatured,
-    String? searchQuery,
+    SortOrder sortOrder = SortOrder.newest,
+  }) {
+    return ListingFilter(
+      query: query,
+      area: area,
+      propertyType: propertyType,
+      category:
+          category == null ? null : ListingCategory.fromAny(category).value,
+      minBedrooms: minBedrooms,
+      minPrice: minPrice,
+      maxPrice: maxPrice,
+      isVerified: isVerified,
+      isFeatured: isFeatured,
+      sortOrder: sortOrder,
+    );
+  }
+
+  ListingFilter copyWith({
+    String? query,
+    String? area,
+    String? propertyType,
+    String? category,
+    int? minBedrooms,
+    double? minPrice,
+    double? maxPrice,
+    bool? isVerified,
+    bool? isFeatured,
     SortOrder? sortOrder,
+    bool clearQuery = false,
     bool clearArea = false,
     bool clearType = false,
+    bool clearCategory = false,
     bool clearBeds = false,
     bool clearPrice = false,
     bool clearVerified = false,
   }) {
     return ListingFilter(
+      query: clearQuery ? null : (query ?? this.query),
       area: clearArea ? null : (area ?? this.area),
-      state: state ?? this.state,
       propertyType: clearType ? null : (propertyType ?? this.propertyType),
-      category: category ?? this.category,
+      category: clearCategory
+          ? null
+          : (category != null
+              ? ListingCategory.fromAny(category).value
+              : this.category),
       minBedrooms: clearBeds ? null : (minBedrooms ?? this.minBedrooms),
       minPrice: clearPrice ? null : (minPrice ?? this.minPrice),
       maxPrice: clearPrice ? null : (maxPrice ?? this.maxPrice),
       isVerified: clearVerified ? null : (isVerified ?? this.isVerified),
       isFeatured: isFeatured ?? this.isFeatured,
-      searchQuery: searchQuery ?? this.searchQuery,
       sortOrder: sortOrder ?? this.sortOrder,
     );
   }
 
+  /// Counts every field that actually affects the result set — the old
+  /// version omitted category, isFeatured, and the text query entirely,
+  /// so the "N filters active" chip in Search under-counted.
   int get activeFilterCount {
     int c = 0;
+    if (query != null && query!.isNotEmpty) c++;
     if (area != null) c++;
     if (propertyType != null) c++;
+    if (category != null) c++;
     if (minBedrooms != null) c++;
     if (minPrice != null || maxPrice != null) c++;
     if (isVerified == true) c++;
+    if (isFeatured == true) c++;
     return c;
   }
 
   @override
   bool operator ==(Object other) =>
+      identical(this, other) ||
       other is ListingFilter &&
-      other.area == area &&
-      other.state == state &&
-      other.propertyType == propertyType &&
-      other.category == category &&
-      other.minBedrooms == minBedrooms &&
-      other.minPrice == minPrice &&
-      other.maxPrice == maxPrice &&
-      other.isVerified == isVerified &&
-      other.isFeatured == isFeatured &&
-      other.sortOrder == sortOrder;
+          other.query == query &&
+          other.area == area &&
+          other.propertyType == propertyType &&
+          other.category == category &&
+          other.minBedrooms == minBedrooms &&
+          other.minPrice == minPrice &&
+          other.maxPrice == maxPrice &&
+          other.isVerified == isVerified &&
+          other.isFeatured == isFeatured &&
+          other.sortOrder == sortOrder;
 
   @override
-  int get hashCode => Object.hash(area, state, propertyType, category,
+  int get hashCode => Object.hash(query, area, propertyType, category,
       minBedrooms, minPrice, maxPrice, isVerified, isFeatured, sortOrder);
 }

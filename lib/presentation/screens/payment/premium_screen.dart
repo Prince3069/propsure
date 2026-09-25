@@ -68,18 +68,10 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
       return;
     }
 
-    final amountKobo = _billing == 0
-        ? plan['monthlyKobo'] as int
-        : plan['yearlyKobo'] as int;
-    final amountNGN = _billing == 0
-        ? plan['monthlyNGN'] as int
-        : plan['yearlyNGN'] as int;
-
     final result = await PaystackService.initPayment(
       userId: userId,
       userEmail: user.email ?? '${user.phone}@propsure.temp',
-      amountKobo: amountKobo,
-      type: 'premium',
+      planId: '${plan['planId']}_${_billing == 0 ? 'monthly' : 'yearly'}',
       metadata: {
         'planId': plan['planId'],
         'planName': plan['name'],
@@ -108,7 +100,7 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg,
-      appBar: AppBar(title: Text('Premium Plans', style: GoogleFonts.syne(fontWeight: FontWeight.w700))),
+      appBar: AppBar(title: Text('Premium Plans', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700))),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         // Hero
         Container(
@@ -120,7 +112,7 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
             const Text('⭐', style: TextStyle(fontSize: 32)),
             const SizedBox(width: 14),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Go Premium', style: GoogleFonts.syne(fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white)),
+              Text('Go Premium', style: GoogleFonts.plusJakartaSans(fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white)),
               const Text('More visibility. More deals. More income.', style: TextStyle(color: Colors.white70, fontSize: 12)),
             ])),
           ]),
@@ -169,11 +161,11 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
                         child: Text(plan['tag'] as String, style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.w800))),
                       const SizedBox(height: 4),
                     ],
-                    Text(plan['name'] as String, style: GoogleFonts.syne(fontSize: 18, fontWeight: FontWeight.w800, color: color)),
+                    Text(plan['name'] as String, style: GoogleFonts.plusJakartaSans(fontSize: 18, fontWeight: FontWeight.w800, color: color)),
                   ]),
                   const Spacer(),
                   Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                    Text('₦${_fmt(priceNGN)}', style: GoogleFonts.syne(fontSize: 24, fontWeight: FontWeight.w800, color: color)),
+                    Text('₦${_fmt(priceNGN)}', style: GoogleFonts.plusJakartaSans(fontSize: 24, fontWeight: FontWeight.w800, color: color)),
                     Text(_billing == 0 ? '/month' : '/year', style: TextStyle(fontSize: 11, color: color.withOpacity(0.6))),
                   ]),
                 ]),
@@ -201,7 +193,7 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
                       : Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                           const Icon(Icons.lock_rounded, size: 15, color: Colors.white),
                           const SizedBox(width: 6),
-                          Text('Subscribe Securely', style: GoogleFonts.syne(fontWeight: FontWeight.w800, color: Colors.white, fontSize: 14)),
+                          Text('Subscribe Securely', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800, color: Colors.white, fontSize: 14)),
                         ]),
                   )),
               ),
@@ -228,10 +220,19 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
     );
   }
 
+  // FIX: the old version divided by 1000 and appended a bare ",000" —
+  // correct for values under ₦1,000,000 (e.g. 25000 -> "25,000") but
+  // wrong for anything at or above it: 1000000 produced "1000,000"
+  // instead of "1,000,000". This formats the whole integer with proper
+  // thousands separators regardless of magnitude.
   String _fmt(int p) {
-    if (p >= 100000) return '${(p / 1000).toStringAsFixed(0)},000';
-    if (p >= 1000) return '${p ~/ 1000},000';
-    return '$p';
+    final s = p.toString();
+    final buffer = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buffer.write(',');
+      buffer.write(s[i]);
+    }
+    return buffer.toString();
   }
 }
 

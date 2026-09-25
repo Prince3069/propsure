@@ -13,6 +13,17 @@ class ChatModel {
   final DateTime createdAt;
   final DateTime updatedAt;
   final bool isArchived;
+  // Any participant can block the conversation for themselves — this is
+  // the "block" half of the review's "report, block, and moderation
+  // flows" item. Blocking is self-directed: if my uid is in blockedBy, I
+  // won't be shown the input bar and can't send further messages; it
+  // doesn't hide me from the other participant (a true mutual/hidden
+  // block would need a Cloud Function to filter chat lists, which is a
+  // reasonable Phase 3 addition once there's real abuse data to act on).
+  final List<String> blockedBy;
+  // Muting is purely a client-side notification preference — no security
+  // implication, so it's fine for the client to set this directly.
+  final List<String> mutedBy;
 
   const ChatModel({
     required this.id,
@@ -27,6 +38,8 @@ class ChatModel {
     required this.createdAt,
     required this.updatedAt,
     this.isArchived = false,
+    this.blockedBy = const [],
+    this.mutedBy = const [],
   });
 
   factory ChatModel.fromFirestore(DocumentSnapshot doc) {
@@ -49,8 +62,13 @@ class ChatModel {
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       isArchived: data['isArchived'] ?? false,
+      blockedBy: List<String>.from(data['blockedBy'] ?? []),
+      mutedBy: List<String>.from(data['mutedBy'] ?? []),
     );
   }
+
+  bool isBlockedBy(String uid) => blockedBy.contains(uid);
+  bool isMutedBy(String uid) => mutedBy.contains(uid);
 
   String otherParticipantId(String myId) =>
       participantIds.firstWhere((id) => id != myId, orElse: () => '');

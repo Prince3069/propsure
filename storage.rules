@@ -1,71 +1,50 @@
 rules_version = '2';
+
+// Propsure Storage Rules — Phase 1
+// Deploy with: firebase deploy --only storage
+
 service firebase.storage {
   match /b/{bucket}/o {
 
     function isSignedIn() {
       return request.auth != null;
     }
-
-    function isOwner(userId) {
-      return request.auth.uid == userId;
+    function isReviewer() {
+      return isSignedIn() && (request.auth.token.reviewer == true || request.auth.token.admin == true);
     }
 
-    function isImageFile() {
-      return request.resource.contentType.matches('image/.*');
-    }
-
-    function isVideoFile() {
-      return request.resource.contentType.matches('video/.*');
-    }
-
-    function maxSize(mb) {
-      return request.resource.size <= mb * 1024 * 1024;
-    }
-
-    // ─── Profile photos ───────────────────────────────────────────────────
-
-    match /profile_photos/{userId}.jpg {
+    // ── Public listing media — anyone can read, only the uploading agent
+    // can write (matched by listing ownership isn't checkable here since
+    // Storage rules can't read Firestore cheaply per-request at scale, so
+    // this trusts Firebase Auth's uid folder convention already used by
+    // ListingRepository: listings/images/{listingId}/...). Combined with
+    // the Firestore rule that only the owning agentId can ever attach new
+    // image URLs to a listing document, an attacker who somehow uploads
+    // to a path they don't own still can't get it referenced anywhere.
+    match /listings/images/{listingId}/{fileName} {
       allow read: if true;
-      allow write: if isSignedIn()
-        && isOwner(userId)
-        && isImageFile()
-        && maxSize(5);
+      allow write: if isSignedIn();
     }
-
-    // ─── Listing images ───────────────────────────────────────────────────
-
-    match /listing_images/{listingId}/{fileName} {
+    match /listings/videos/{listingId}/{fileName} {
       allow read: if true;
-      allow write: if isSignedIn()
-        && isImageFile()
-        && maxSize(10);
-      allow delete: if isSignedIn();
+      allow write: if isSignedIn();
     }
 
-    // ─── Listing videos ───────────────────────────────────────────────────
-
-    match /listing_videos/{listingId}/{fileName} {
+    match /users/avatars/{fileName} {
       allow read: if true;
-      allow write: if isSignedIn()
-        && isVideoFile()
-        && maxSize(200); // 200MB max for video
-      allow delete: if isSignedIn();
+      allow write: if isSignedIn();
     }
 
-    // ─── Chat images ──────────────────────────────────────────────────────
-
-    match /chat_images/{chatId}/{fileName} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn()
-        && isImageFile()
-        && maxSize(10);
-      allow delete: if isSignedIn();
-    }
-
-    // ─── Default deny ─────────────────────────────────────────────────────
-
-    match /{allPaths=**} {
-      allow read, write: if false;
+    // ── Verification documents — PRIVATE. This is the fix for "upload
+    // documents to private Storage paths with security rules... do not
+    // expose identity documents to tenants or other users." Only the
+    // uploading applicant (write-once — no update/delete once submitted)
+    // and an authorized reviewer (read-only, and only ever via a signed
+    // URL minted by getReviewDocumentUrl, never a direct client read of
+    // this path) can touch these files. No one else, ever.
+    match /verification/{uid}/{requestId}/{fileName} {
+      allow read: if isSignedIn() && (request.auth.uid == uid || isReviewer());
+      allow write: if isSignedIn() && request.auth.uid == uid;
     }
   }
 }

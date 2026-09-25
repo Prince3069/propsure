@@ -17,8 +17,11 @@ import '../../presentation/screens/listings/upload_listing_screen.dart';
 import '../../presentation/screens/bookings/bookings_screen.dart';
 import '../../presentation/screens/bookings/booking_detail_screen.dart';
 import '../../presentation/screens/saved/saved_listings_screen.dart';
+import '../../presentation/screens/search/saved_searches_screen.dart';
+import '../../presentation/screens/compare/compare_screen.dart';
 import '../../presentation/screens/notifications/notifications_screen.dart';
 import '../../presentation/screens/agent/agent_profile_screen.dart';
+import '../../presentation/screens/agent/agent_listings_screen.dart';
 import '../../presentation/screens/verification/verification_screen.dart';
 import '../../presentation/screens/payment/boost_listing_screen.dart';
 import '../../presentation/screens/payment/premium_screen.dart';
@@ -61,6 +64,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         '/messages',
         '/profile',
         '/saved',
+        '/saved-searches',
         '/bookings',
         '/notifications',
         '/profile/edit',
@@ -122,11 +126,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           return EditListingScreen(listingId: listingId);
         },
       ),
-      // Keep the old edit route for backward compatibility
+      // Consolidated: this used to build a second, less complete edit
+      // screen (UploadListingScreen(editListingId:)) which drifted from
+      // EditListingScreen over time — e.g. it never actually loaded the
+      // existing listing's category/location. Kept only as a redirect so
+      // old deep links (push notifications, shared links) still work.
       GoRoute(
         path: '/listing/:id/edit',
-        builder: (_, state) =>
-            UploadListingScreen(editListingId: state.pathParameters['id']),
+        redirect: (_, state) => '/listing/edit/${state.pathParameters['id']}',
       ),
       GoRoute(
         path: '/listing/:id',
@@ -159,13 +166,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // ── Misc ──────────────────────────────────────────────────────────────
       GoRoute(path: '/saved', builder: (_, __) => const SavedListingsScreen()),
       GoRoute(
+          path: '/saved-searches',
+          builder: (_, __) => const SavedSearchesScreen()),
+      GoRoute(path: '/compare', builder: (_, __) => const CompareScreen()),
+      GoRoute(
           path: '/notifications',
           builder: (_, __) => const NotificationsScreen()),
       GoRoute(
           path: '/profile/edit', builder: (_, __) => const EditProfileScreen()),
       GoRoute(
           path: '/profile/listings',
-          builder: (_, __) => const SavedListingsScreen()),
+          builder: (_, __) => const AgentListingsScreen()),
 
       // ── Verification ──────────────────────────────────────────────────────
       GoRoute(

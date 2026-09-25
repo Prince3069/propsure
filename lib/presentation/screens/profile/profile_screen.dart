@@ -48,7 +48,7 @@ class _GuestProfile extends StatelessWidget {
       appBar: AppBar(
         title: Text(
           'Profile',
-          style: GoogleFonts.syne(fontWeight: FontWeight.w700),
+          style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700),
         ),
       ),
       body: Center(
@@ -92,7 +92,7 @@ class _GuestProfile extends StatelessWidget {
                     icon: const Icon(Icons.login_rounded),
                     label: Text(
                       'Sign In / Create Account',
-                      style: GoogleFonts.syne(fontWeight: FontWeight.w700),
+                      style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700),
                     ),
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
@@ -304,7 +304,7 @@ class _ProfileHeader extends StatelessWidget {
                         Expanded(
                           child: Text(
                             user.name,
-                            style: GoogleFonts.syne(
+                            style: GoogleFonts.plusJakartaSans(
                               fontSize: 19,
                               fontWeight: FontWeight.w800,
                               color: AppColors.text,
@@ -450,7 +450,7 @@ class _StatBox extends StatelessWidget {
             children: [
               Text(
                 value,
-                style: GoogleFonts.syne(
+                style: GoogleFonts.plusJakartaSans(
                   fontSize: 18,
                   fontWeight: FontWeight.w800,
                   color: AppColors.primaryDark,
@@ -505,7 +505,7 @@ class _ProfileBody extends ConsumerWidget {
                         children: [
                           Text(
                             'Go Premium Agent',
-                            style: GoogleFonts.syne(
+                            style: GoogleFonts.plusJakartaSans(
                               fontSize: 13,
                               fontWeight: FontWeight.w800,
                               color: Colors.white,
@@ -732,7 +732,7 @@ class _ProfileBody extends ConsumerWidget {
                   const SizedBox(width: 8),
                   Text(
                     'Sign Out',
-                    style: GoogleFonts.outfit(
+                    style: GoogleFonts.plusJakartaSans(
                       fontWeight: FontWeight.w700,
                       fontSize: 14,
                       color: AppColors.error,

@@ -118,7 +118,13 @@ class _UploadListingScreenState extends ConsumerState<UploadListingScreen> {
         'description': _descCtrl.text.trim(),
         'price': double.tryParse(_priceCtrl.text.replaceAll(',', '')) ?? 0,
         'propertyType': _propertyType ?? 'Flat / Apartment',
-        'category': _category ?? 'For Rent',
+        // The dropdown shows the human label ("For Rent"), but only the
+        // canonical machine value ("for_rent") is ever persisted — this is
+        // the fix for the category-normalization bug: previously the raw
+        // UI label was written straight to Firestore, breaking search
+        // filters and price-period formatting for anything but the exact
+        // string the model happened to default to.
+        'category': ListingCategory.fromAny(_category).value,
         'location': await _buildLocation(),
         'bedrooms': _bedrooms,
         'bathrooms': _bathrooms,

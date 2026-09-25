@@ -9,6 +9,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/app_theme.dart';
 import '../../../core/widgets/common_widgets.dart';
+import '../../../data/repositories/enquiry_repository.dart';
 import '../../providers/app_providers.dart';
 
 class ListingDetailScreen extends ConsumerStatefulWidget {
@@ -22,6 +23,7 @@ class ListingDetailScreen extends ConsumerStatefulWidget {
 class _ListingDetailScreenState extends ConsumerState<ListingDetailScreen> {
   int _photoIdx = 0;
   bool _descExpanded = false;
+  bool _viewTracked = false;
   final _pageCtrl = PageController();
 
   @override
@@ -155,56 +157,142 @@ class _ListingDetailScreenState extends ConsumerState<ListingDetailScreen> {
       return;
     }
 
-    final confirm = await showDialog<bool>(
+    final confirm = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Delete Listing?'),
+        title: const Text('Remove Listing?'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Are you sure you want to delete this listing?'),
-            const SizedBox(height: 8),
             Text(
               listing.title,
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
+            // Soft delete is now the default path — see the review's
+            // "Improve listing lifecycle and deletion semantics" section.
+            // Archiving keeps the document (so any existing chat/booking
+            // that references it doesn't break) and can be undone from
+            // My Listings; permanent delete is a separate, rarer action.
             const Text(
-              'This action cannot be undone. All images and data will be permanently removed.',
-              style: TextStyle(fontSize: 12, color: AppColors.text3),
-            ),
+                'Archiving hides it from search and your live listings, '
+                'and you can restore it later from My Listings.',
+                style: TextStyle(fontSize: 12, color: AppColors.text3)),
           ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(context, null),
             child: const Text('Cancel'),
           ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'permanent'),
+            child: const Text('Delete Permanently',
+                style: TextStyle(color: AppColors.error)),
+          ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.error,
-            ),
-            child: const Text('Delete'),
+            onPressed: () => Navigator.pop(context, 'archive'),
+            child: const Text('Archive'),
           ),
         ],
       ),
     );
 
-    if (confirm != true) return;
+    if (confirm == null) return;
 
     final repo = ref.read(listingRepositoryProvider);
-    await repo.deleteListing(widget.listingId, listing.agentId);
+    if (confirm == 'archive') {
+      await repo.archiveListing(widget.listingId, userId);
+    } else {
+      await repo.deleteListingPermanently(widget.listingId, listing.agentId);
+    }
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Listing deleted successfully'),
+        SnackBar(
+          content: Text(confirm == 'archive'
+              ? 'Listing archived — restore it anytime from My Listings.'
+              : 'Listing permanently deleted.'),
           backgroundColor: AppColors.success,
         ),
       );
       context.go('/home');
+    }
+  }
+
+  // ─── COMPARE (Phase 4, review 3.4) ───
+  void _toggleCompare(String listingId) {
+    final notifier = ref.read(compareListProvider.notifier);
+    final wasIn = ref.read(compareListProvider).contains(listingId);
+    final added = notifier.toggle(listingId);
+    if (!added) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('You can compare up to 3 properties at a time.')));
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(wasIn ? 'Removed from comparison.' : 'Added to comparison.'),
+      action: SnackBarAction(label: 'View', onPressed: () => context.push('/compare')),
+    ));
+  }
+
+  // ─── REPORT LISTING ───
+  Future<void> _reportListing(dynamic listing) async {
+    final userId = ref.read(currentUserIdProvider);
+    if (userId == null) {
+      _requireAuth('report');
+      return;
+    }
+    final reason = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 20, 20, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Report this listing',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+            ),
+          ),
+          for (final reason in const [
+            'Scam or fraud',
+            'Duplicate listing',
+            'Property no longer available',
+            'Misleading information',
+            'Suspected harassment',
+            'Something else',
+          ])
+            ListTile(
+              title: Text(reason),
+              onTap: () => Navigator.pop(context, reason),
+            ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+    if (reason == null || !mounted) return;
+
+    try {
+      await ref.read(reportRepositoryProvider).submitReport(
+            reporterId: userId,
+            targetType: 'listing',
+            targetId: widget.listingId,
+            reason: reason,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'Thanks — our team will review this listing shortly.')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not submit report: $e')));
+      }
     }
   }
 
@@ -232,6 +320,15 @@ class _ListingDetailScreenState extends ConsumerState<ListingDetailScreen> {
             (user?.role == 'admin');
         final canDelete = canEdit;
 
+        // View-count tracking: once per screen visit, deduplicated
+        // server-side per viewer via incrementViewOnce (see
+        // listing_repository.dart) — not on every rebuild, and only for
+        // someone who isn't the owner viewing their own listing.
+        if (!_viewTracked && userId != null && !canEdit) {
+          _viewTracked = true;
+          ref.read(listingRepositoryProvider).incrementViewOnce(listing.id, userId);
+        }
+
         if (isDesktop) {
           return _DesktopLayout(
             listing: listing,
@@ -244,6 +341,9 @@ class _ListingDetailScreenState extends ConsumerState<ListingDetailScreen> {
             onBook: () => _requireAuth('book'),
             onCall: () => _callAgent(listing.agentPhone),
             onDelete: canDelete ? _deleteListing : null,
+            onReport: !canEdit ? () => _reportListing(listing) : null,
+            isInCompare: ref.watch(compareListProvider).contains(listing.id),
+            onCompareToggle: !canEdit ? () => _toggleCompare(listing.id) : null,
             onEdit: canEdit
                 ? () => context.push('/listing/edit/${listing.id}')
                 : null,
@@ -266,6 +366,9 @@ class _ListingDetailScreenState extends ConsumerState<ListingDetailScreen> {
           onBook: () => _requireAuth('book'),
           onCall: () => _callAgent(listing.agentPhone),
           onDelete: canDelete ? _deleteListing : null,
+          onReport: !canEdit ? () => _reportListing(listing) : null,
+          isInCompare: ref.watch(compareListProvider).contains(listing.id),
+          onCompareToggle: !canEdit ? () => _toggleCompare(listing.id) : null,
           onEdit: canEdit
               ? () => context.push('/listing/edit/${listing.id}')
               : null,
@@ -301,6 +404,9 @@ class _MobileLayout extends StatelessWidget {
       onExpandDesc;
   final VoidCallback? onDelete;
   final VoidCallback? onEdit;
+  final VoidCallback? onReport;
+  final VoidCallback? onCompareToggle;
+  final bool isInCompare;
   final int photoIdx;
   final PageController pageCtrl;
   final ValueChanged<int> onPageChanged;
@@ -319,6 +425,9 @@ class _MobileLayout extends StatelessWidget {
     required this.onExpandDesc,
     this.onDelete,
     this.onEdit,
+    this.onReport,
+    this.onCompareToggle,
+    this.isInCompare = false,
     required this.photoIdx,
     required this.pageCtrl,
     required this.onPageChanged,
@@ -337,6 +446,9 @@ class _MobileLayout extends StatelessWidget {
             onShare: onShare,
             onDelete: onDelete,
             onEdit: onEdit,
+            onReport: onReport,
+            onCompareToggle: onCompareToggle,
+            isInCompare: isInCompare,
             photoIdx: photoIdx,
             pageCtrl: pageCtrl,
             onPageChanged: onPageChanged,
@@ -379,6 +491,9 @@ class _DesktopLayout extends StatelessWidget {
       onExpandDesc;
   final VoidCallback? onDelete;
   final VoidCallback? onEdit;
+  final VoidCallback? onReport;
+  final VoidCallback? onCompareToggle;
+  final bool isInCompare;
   final int photoIdx;
   final PageController pageCtrl;
   final ValueChanged<int> onPageChanged;
@@ -397,6 +512,9 @@ class _DesktopLayout extends StatelessWidget {
     required this.onExpandDesc,
     this.onDelete,
     this.onEdit,
+    this.onReport,
+    this.onCompareToggle,
+    this.isInCompare = false,
     required this.photoIdx,
     required this.pageCtrl,
     required this.onPageChanged,
@@ -420,6 +538,20 @@ class _DesktopLayout extends StatelessWidget {
               icon: const Icon(Icons.delete_outline_rounded,
                   color: AppColors.error),
               onPressed: onDelete,
+            ),
+          if (onReport != null)
+            IconButton(
+              icon: const Icon(Icons.flag_outlined, color: AppColors.text2),
+              onPressed: onReport,
+            ),
+          if (onCompareToggle != null)
+            IconButton(
+              icon: Icon(
+                isInCompare ? Icons.check_circle_rounded : Icons.compare_arrows_rounded,
+                color: isInCompare ? AppColors.primary : AppColors.text2,
+              ),
+              tooltip: isInCompare ? 'Added to compare' : 'Add to compare',
+              onPressed: onCompareToggle,
             ),
           IconButton(
               icon: const Icon(Icons.share_outlined), onPressed: onShare),
@@ -473,6 +605,9 @@ class _PhotoSliver extends StatelessWidget {
   final VoidCallback onSave, onShare;
   final VoidCallback? onDelete;
   final VoidCallback? onEdit;
+  final VoidCallback? onReport;
+  final VoidCallback? onCompareToggle;
+  final bool isInCompare;
   final int photoIdx;
   final PageController pageCtrl;
   final ValueChanged<int> onPageChanged;
@@ -484,6 +619,9 @@ class _PhotoSliver extends StatelessWidget {
     required this.onShare,
     this.onDelete,
     this.onEdit,
+    this.onReport,
+    this.onCompareToggle,
+    this.isInCompare = false,
     required this.photoIdx,
     required this.pageCtrl,
     required this.onPageChanged,
@@ -549,6 +687,35 @@ class _PhotoSliver extends StatelessWidget {
             ),
           ),
         ),
+        // ── Report Button (only shown for listings you don't own) ──
+        if (onReport != null)
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: CircleAvatar(
+              backgroundColor: Colors.black54,
+              child: IconButton(
+                icon: const Icon(Icons.flag_outlined,
+                    color: Colors.white, size: 19),
+                onPressed: onReport,
+              ),
+            ),
+          ),
+        // ── Compare Button (Phase 4) ──
+        if (onCompareToggle != null)
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: CircleAvatar(
+              backgroundColor: isInCompare ? AppColors.primary : Colors.black54,
+              child: IconButton(
+                icon: Icon(
+                  isInCompare ? Icons.check_rounded : Icons.compare_arrows_rounded,
+                  color: Colors.white,
+                  size: 19,
+                ),
+                onPressed: onCompareToggle,
+              ),
+            ),
+          ),
         // ── Save Button ──
         Padding(
           padding: const EdgeInsets.fromLTRB(0, 8, 12, 8),
@@ -805,7 +972,7 @@ class _DetailBody extends StatelessWidget {
                   children: [
                     Text(
                       _fmtPrice(listing.price),
-                      style: GoogleFonts.syne(
+                      style: GoogleFonts.plusJakartaSans(
                         fontSize: 24,
                         fontWeight: FontWeight.w800,
                         color: AppColors.primary,
@@ -1280,7 +1447,7 @@ class _ActionBar extends StatelessWidget {
               label: Text(
                 isSignedIn ? 'Book Inspection' : 'Sign in to book',
                 style:
-                    GoogleFonts.syne(fontWeight: FontWeight.w700, fontSize: 13),
+                    GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700, fontSize: 13),
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
@@ -1324,7 +1491,7 @@ class _StickyPanel extends StatelessWidget {
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(
                   _fmtPrice(listing.price),
-                  style: GoogleFonts.syne(
+                  style: GoogleFonts.plusJakartaSans(
                       fontSize: 28,
                       fontWeight: FontWeight.w800,
                       color: AppColors.primary),
@@ -1364,7 +1531,7 @@ class _StickyPanel extends StatelessWidget {
                   icon: const Icon(Icons.calendar_today_rounded, size: 15),
                   label: Text(
                     'Book Inspection Tour',
-                    style: GoogleFonts.syne(fontWeight: FontWeight.w700),
+                    style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700),
                   ),
                   style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14)),
@@ -1510,6 +1677,33 @@ class _BookingSheetState extends ConsumerState<_BookingSheet> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
+          const SizedBox(height: 8),
+          // Not every interaction needs a scheduled viewing — the review
+          // is explicit that a booking model alone doesn't cover a
+          // general question or a call-back request. Additive link
+          // rather than reworking this sheet, so the existing booking
+          // flow is untouched.
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
+              onPressed: () {
+                Navigator.pop(context);
+                showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.transparent,
+                  builder: (_) => _QuickEnquirySheet(
+                    listingId: widget.listingId,
+                    agentId: widget.agentId,
+                    listingTitle: widget.listingTitle,
+                  ),
+                );
+              },
+              child: const Text('Not ready to book a tour? Ask a quick question instead →',
+                  style: TextStyle(fontSize: 12, color: AppColors.primary)),
+            ),
+          ),
           const SizedBox(height: 20),
           Text('Select Date', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 10),
@@ -1614,7 +1808,7 @@ class _BookingSheetState extends ConsumerState<_BookingSheet> {
                       child: CircularProgressIndicator(
                           strokeWidth: 2, color: Colors.white))
                   : Text('Send Inspection Request',
-                      style: GoogleFonts.syne(
+                      style: GoogleFonts.plusJakartaSans(
                           fontWeight: FontWeight.w800, fontSize: 14)),
             ),
           ),
@@ -1632,4 +1826,176 @@ String _fmtPrice(double price) {
     return '₦${(price / 1000).toStringAsFixed(0)}k';
   }
   return '₦${price.toStringAsFixed(0)}';
+}
+
+// ─── QUICK ENQUIRY SHEET (Phase 3) ──────────────────────────────────────────
+// Covers the review's "general enquiry" and "call request" cases that the
+// booking model (a scheduled viewing) was never meant to handle. Feeds
+// EnquiryRepository, which is also what the supplier dashboard's future
+// response-rate signal (and LeadRadar) will read from.
+class _QuickEnquirySheet extends ConsumerStatefulWidget {
+  final String listingId, agentId, listingTitle;
+  const _QuickEnquirySheet({
+    required this.listingId,
+    required this.agentId,
+    required this.listingTitle,
+  });
+  @override
+  ConsumerState<_QuickEnquirySheet> createState() => _QuickEnquirySheetState();
+}
+
+class _QuickEnquirySheetState extends ConsumerState<_QuickEnquirySheet> {
+  EnquiryType _type = EnquiryType.general;
+  String? _budgetRange;
+  String _channel = 'chat';
+  final _msgCtrl = TextEditingController();
+  bool _sending = false;
+
+  static const _budgets = ['Under ₦500k', '₦500k–₦1M', '₦1M–₦2M', '₦2M–₦5M', 'Above ₦5M'];
+
+  @override
+  void dispose() {
+    _msgCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final userId = ref.read(currentUserIdProvider);
+    final user = ref.read(currentUserModelProvider).value;
+    if (userId == null || user == null) return;
+
+    setState(() => _sending = true);
+    try {
+      await ref.read(enquiryRepositoryProvider).submitEnquiry(EnquiryModel(
+            id: '',
+            listingId: widget.listingId,
+            listingTitle: widget.listingTitle,
+            enquirerId: userId,
+            enquirerName: user.name,
+            enquirerPhone: user.phone,
+            agentId: widget.agentId,
+            type: _type,
+            budgetRange: _budgetRange,
+            preferredContactChannel: _channel,
+            message: _msgCtrl.text.trim().isNotEmpty ? _msgCtrl.text.trim() : null,
+            createdAt: DateTime.now(),
+          ));
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Sent! The agent will be notified of your enquiry.')));
+      }
+    } catch (e) {
+      setState(() => _sending = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not send: $e')));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.55,
+      maxChildSize: 0.9,
+      minChildSize: 0.35,
+      builder: (_, ctrl) => Container(
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
+        ),
+        padding: const EdgeInsets.fromLTRB(18, 10, 18, 18),
+        child: ListView(controller: ctrl, children: [
+          Center(
+              child: Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2)),
+          )),
+          const SizedBox(height: 18),
+          Text('Quick Enquiry', style: Theme.of(context).textTheme.headlineSmall),
+          const SizedBox(height: 3),
+          Text(widget.listingTitle,
+              style: Theme.of(context).textTheme.bodySmall, maxLines: 1, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 18),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            _EnquiryTypeChip(
+                label: 'General question',
+                selected: _type == EnquiryType.general,
+                onTap: () => setState(() => _type = EnquiryType.general)),
+            _EnquiryTypeChip(
+                label: 'Request a call',
+                selected: _type == EnquiryType.callRequest,
+                onTap: () => setState(() => _type = EnquiryType.callRequest)),
+            _EnquiryTypeChip(
+                label: 'Application / reservation',
+                selected: _type == EnquiryType.applicationRequest,
+                onTap: () => setState(() => _type = EnquiryType.applicationRequest)),
+          ]),
+          const SizedBox(height: 16),
+          Text('Your budget (optional)', style: Theme.of(context).textTheme.labelMedium),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 8, children: _budgets
+              .map((b) => _EnquiryTypeChip(
+                    label: b,
+                    selected: _budgetRange == b,
+                    onTap: () => setState(() => _budgetRange = _budgetRange == b ? null : b),
+                  ))
+              .toList()),
+          const SizedBox(height: 16),
+          Text('Preferred contact', style: Theme.of(context).textTheme.labelMedium),
+          const SizedBox(height: 8),
+          Row(children: [
+            _EnquiryTypeChip(label: 'In-app chat', selected: _channel == 'chat', onTap: () => setState(() => _channel = 'chat')),
+            const SizedBox(width: 8),
+            _EnquiryTypeChip(label: 'Phone call', selected: _channel == 'call', onTap: () => setState(() => _channel = 'call')),
+          ]),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _msgCtrl,
+            maxLines: 3,
+            decoration: const InputDecoration(
+                hintText: 'Anything specific you want to ask? (optional)'),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _sending ? null : _submit,
+              style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
+              child: _sending
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : Text('Send Enquiry', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800, fontSize: 14)),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+class _EnquiryTypeChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _EnquiryTypeChip({required this.label, required this.selected, required this.onTap});
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.primary : AppColors.bg,
+            borderRadius: BorderRadius.circular(99),
+            border: Border.all(color: selected ? AppColors.primary : AppColors.border),
+          ),
+          child: Text(label,
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: selected ? Colors.white : AppColors.text2)),
+        ),
+      );
 }

@@ -7,11 +7,39 @@ import '../../../core/widgets/common_widgets.dart';
 import '../../providers/app_providers.dart';
 import '../../../data/models/chat_model.dart';
 
-class ChatListScreen extends ConsumerWidget {
+class ChatListScreen extends ConsumerStatefulWidget {
   const ChatListScreen({super.key});
+  @override
+  ConsumerState<ChatListScreen> createState() => _ChatListScreenState();
+}
+
+class _ChatListScreenState extends ConsumerState<ChatListScreen> {
+  bool _searching = false;
+  String _query = '';
+  final _searchCtrl = TextEditingController();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  // Filters client-side over whatever userChatsProvider already streamed
+  // — matches the other participant's name or the listing title. Fixes
+  // the search icon that previously had `onPressed: () {}` — nothing
+  // happened when tapped.
+  List<ChatModel> _filtered(List<ChatModel> chats, String userId) {
+    if (_query.trim().isEmpty) return chats;
+    final q = _query.trim().toLowerCase();
+    return chats.where((c) {
+      final otherName = c.otherParticipantName(userId).toLowerCase();
+      final listingTitle = (c.listingTitle ?? '').toLowerCase();
+      return otherName.contains(q) || listingTitle.contains(q);
+    }).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final userId = ref.watch(currentUserIdProvider);
 
     if (userId == null) {
@@ -23,17 +51,34 @@ class ChatListScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: AppBar(
-        title: Text(
-          'Messages',
-          style: Theme.of(context).textTheme.headlineLarge,
-        ),
+        title: _searching
+            ? TextField(
+                controller: _searchCtrl,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Search conversations…',
+                  border: InputBorder.none,
+                ),
+                style: Theme.of(context).textTheme.bodyLarge,
+                onChanged: (v) => setState(() => _query = v),
+              )
+            : Text(
+                'Messages',
+                style: Theme.of(context).textTheme.headlineLarge,
+              ),
         actions: [
           IconButton(
-            icon: const Icon(
-              Icons.search_rounded,
+            icon: Icon(
+              _searching ? Icons.close_rounded : Icons.search_rounded,
               color: AppColors.text2,
             ),
-            onPressed: () {},
+            onPressed: () => setState(() {
+              _searching = !_searching;
+              if (!_searching) {
+                _query = '';
+                _searchCtrl.clear();
+              }
+            }),
           ),
           const SizedBox(width: 6),
         ],
@@ -85,13 +130,22 @@ class ChatListScreen extends ConsumerWidget {
                   );
                 }
 
+                final visible = _filtered(chats, userId);
+                if (visible.isEmpty) {
+                  return const EmptyState(
+                    icon: Icons.search_off_rounded,
+                    title: 'No matches',
+                    subtitle: 'Try a different name or property.',
+                  );
+                }
+
                 return ListView.separated(
                   padding: const EdgeInsets.fromLTRB(8, 4, 8, 24),
-                  itemCount: chats.length,
+                  itemCount: visible.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 6),
                   itemBuilder: (context, index) {
                     return _ChatTile(
-                      chat: chats[index],
+                      chat: visible[index],
                       userId: userId,
                     );
                   },
@@ -103,8 +157,14 @@ class ChatListScreen extends ConsumerWidget {
                 separatorBuilder: (_, __) => const SizedBox(height: 6),
                 itemBuilder: (_, __) => const _ChatTileSkeleton(),
               ),
+              // Friendly failure state instead of dumping the raw
+              // exception straight to the screen.
               error: (error, _) => Center(
-                child: Text('Error: $error'),
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text('Couldn\'t load your messages right now.',
+                      style: const TextStyle(fontSize: 13, color: AppColors.text3)),
+                ),
               ),
             ),
           ),

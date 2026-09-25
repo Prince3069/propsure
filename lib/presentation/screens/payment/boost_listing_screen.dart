@@ -21,9 +21,9 @@ class _BoostListingScreenState extends ConsumerState<BoostListingScreen> {
   String? _error;
 
   static const _plans = [
-    {'days': 7,  'priceNGN': 5000,  'priceKobo': 500000,  'label': 'Starter',  'tag': ''},
-    {'days': 14, 'priceNGN': 10000, 'priceKobo': 1000000, 'label': 'Standard', 'tag': 'POPULAR'},
-    {'days': 30, 'priceNGN': 20000, 'priceKobo': 2000000, 'label': 'Premium',  'tag': 'BEST VALUE'},
+    {'days': 7,  'planId': 'boost_7',  'priceNGN': 5000,  'label': 'Starter',  'tag': ''},
+    {'days': 14, 'planId': 'boost_14', 'priceNGN': 10000, 'label': 'Standard', 'tag': 'POPULAR'},
+    {'days': 30, 'planId': 'boost_30', 'priceNGN': 20000, 'label': 'Premium',  'tag': 'BEST VALUE'},
   ];
 
   List<String> _benefits(int plan) {
@@ -47,8 +47,7 @@ class _BoostListingScreenState extends ConsumerState<BoostListingScreen> {
     final result = await PaystackService.initPayment(
       userId: userId,
       userEmail: user.email ?? '${user.phone}@propsure.temp',
-      amountKobo: plan['priceKobo'] as int,
-      type: 'boost',
+      planId: plan['planId'] as String,
       metadata: {
         'listingId': widget.listingId,
         'boostDays': plan['days'],
@@ -78,7 +77,7 @@ class _BoostListingScreenState extends ConsumerState<BoostListingScreen> {
     final plan = _plans[_plan];
     return Scaffold(
       backgroundColor: AppColors.bg,
-      appBar: AppBar(title: Text('Boost Listing', style: GoogleFonts.syne(fontWeight: FontWeight.w700))),
+      appBar: AppBar(title: Text('Boost Listing', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700))),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         // Hero
         Container(
@@ -140,7 +139,7 @@ class _BoostListingScreenState extends ConsumerState<BoostListingScreen> {
                 ])),
                 Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                   Text('₦${_fmtNGN(p['priceNGN'] as int)}',
-                    style: GoogleFonts.syne(fontSize: 16, fontWeight: FontWeight.w800,
+                    style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w800,
                       color: sel ? AppColors.primary : AppColors.text)),
                   Text('one-time', style: const TextStyle(fontSize: 10, color: AppColors.text3)),
                 ]),
@@ -195,7 +194,7 @@ class _BoostListingScreenState extends ConsumerState<BoostListingScreen> {
                   const Icon(Icons.lock_rounded, size: 16),
                   const SizedBox(width: 8),
                   Text('Pay ₦${_fmtNGN(plan['priceNGN'] as int)} Securely',
-                    style: GoogleFonts.syne(fontWeight: FontWeight.w800, fontSize: 14)),
+                    style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800, fontSize: 14)),
                 ]),
           )),
         const SizedBox(height: 12),
@@ -209,5 +208,17 @@ class _BoostListingScreenState extends ConsumerState<BoostListingScreen> {
     );
   }
 
-  String _fmtNGN(int n) => n >= 1000 ? '${n ~/ 1000},000' : '$n';
+  // Same fix as premium_screen.dart's _fmt — n ~/ 1000 followed by a
+  // bare ",000" breaks for six-figure-plus values (e.g. 1000000 ->
+  // "1000,000" instead of "1,000,000"). Proper thousands-grouping
+  // regardless of magnitude.
+  String _fmtNGN(int n) {
+    final s = n.toString();
+    final buffer = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buffer.write(',');
+      buffer.write(s[i]);
+    }
+    return buffer.toString();
+  }
 }

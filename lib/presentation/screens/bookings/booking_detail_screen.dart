@@ -22,18 +22,23 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
   Future<void> _updateStatus(String action) async {
     setState(() => _loading = true);
     final repo = ref.read(bookingRepositoryProvider);
+    final actorId = ref.read(currentUserIdProvider);
+    if (actorId == null) {
+      setState(() => _loading = false);
+      return;
+    }
     switch (action) {
       case 'confirm':
-        await repo.confirmBooking(widget.bookingId);
+        await repo.confirmBooking(widget.bookingId, actorId: actorId);
         break;
       case 'reject':
         await _rejectWithReason();
         return;
       case 'cancel':
-        await repo.cancelBooking(widget.bookingId);
+        await repo.cancelBooking(widget.bookingId, actorId: actorId);
         break;
       case 'complete':
-        await repo.completeBooking(widget.bookingId);
+        await repo.completeBooking(widget.bookingId, actorId: actorId);
         break;
     }
     setState(() => _loading = false);
@@ -45,6 +50,11 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
   }
 
   Future<void> _rejectWithReason() async {
+    final actorId = ref.read(currentUserIdProvider);
+    if (actorId == null) {
+      setState(() => _loading = false);
+      return;
+    }
     final ctrl = TextEditingController();
     final reason = await showDialog<String>(
       context: context,
@@ -69,7 +79,7 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
     if (reason != null) {
       await ref
           .read(bookingRepositoryProvider)
-          .rejectBooking(widget.bookingId, reason: reason);
+          .rejectBooking(widget.bookingId, actorId: actorId, reason: reason);
       setState(() => _loading = false);
       if (mounted) {
         context.pop();
@@ -88,7 +98,7 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text('Booking Details',
-            style: GoogleFonts.syne(fontWeight: FontWeight.w700)),
+            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
       ),
       body: FutureBuilder<BookingModel?>(
         future: ref
@@ -424,7 +434,7 @@ class _ActionButtons extends StatelessWidget {
                     child: CircularProgressIndicator(
                         strokeWidth: 2, color: Colors.white))
                 : Text('Confirm',
-                    style: GoogleFonts.syne(
+                    style: GoogleFonts.plusJakartaSans(
                         fontWeight: FontWeight.w800, color: Colors.white)),
           )),
         ]),

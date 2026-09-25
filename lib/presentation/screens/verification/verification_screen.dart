@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import '../../../core/constants/app_theme.dart';
+import '../../../data/models/verification_request_model.dart';
 import '../../providers/app_providers.dart';
 
 class VerificationScreen extends ConsumerStatefulWidget {
@@ -20,6 +21,8 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
   File? _propertyDocFile;
   File? _verificationVideoFile;
   bool _submitting = false;
+  String? _submitError;
+  bool _forceNewRequest = false;
 
   final _steps = ['Identity', 'Property Doc', 'Video Proof', 'Submit'];
 
@@ -42,12 +45,50 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
     }
   }
 
+  // Real submission: uploads every selected document to a private Storage
+  // path and creates a `verification_requests` document, via
+  // VerificationRepository. There is no simulated delay and no success
+  // dialog shown unless the upload + Firestore write both actually
+  // succeeded — on failure the person sees the real error and nothing is
+  // silently marked as submitted.
   Future<void> _submit() async {
-    setState(() => _submitting = true);
-    await Future.delayed(
-        const Duration(seconds: 2)); // Replace with real upload
-    setState(() => _submitting = false);
-    if (mounted) _showSuccess();
+    if (_selfieFile == null || _idFile == null || _propertyDocFile == null) {
+      setState(() => _submitError =
+          'Selfie, Government ID, and Property Document are all required.');
+      return;
+    }
+    final uid = ref.read(currentUserIdProvider);
+    if (uid == null) {
+      setState(() => _submitError = 'Please sign in again and retry.');
+      return;
+    }
+
+    setState(() {
+      _submitting = true;
+      _submitError = null;
+    });
+
+    try {
+      await ref.read(verificationRepositoryProvider).submitVerificationRequest(
+            uid: uid,
+            requestType: 'agent_authority',
+            selfie: _selfieFile,
+            idDocument: _idFile,
+            propertyDocument: _propertyDocFile,
+            video: _verificationVideoFile,
+          );
+      if (mounted) {
+        setState(() => _submitting = false);
+        _showSuccess();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _submitting = false;
+          _submitError = e.toString().replaceFirst('Exception: ', '');
+        });
+      }
+    }
   }
 
   void _showSuccess() {
@@ -67,7 +108,7 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
                         size: 40, color: AppColors.primary)),
                 const SizedBox(height: 16),
                 Text('Submitted!',
-                    style: GoogleFonts.syne(
+                    style: GoogleFonts.plusJakartaSans(
                         fontSize: 20, fontWeight: FontWeight.w800)),
                 const SizedBox(height: 8),
                 const Text(
@@ -90,13 +131,47 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Real status gate: if the person already has a pending or approved
+    // request, show that instead of always re-showing the submission
+    // wizard. Rejected/needs-changes requests let them start a fresh one.
+    final requestAsync = ref.watch(myVerificationRequestProvider);
+    final existing = requestAsync.value;
+    if (!_forceNewRequest &&
+        existing != null &&
+        existing.status != VerificationRequestStatus.draft) {
+      if (existing.isPending || existing.isApproved) {
+        return _VerificationStatusScreen(request: existing);
+      }
+      if (existing.isRejected) {
+        return _VerificationStatusScreen(
+          request: existing,
+          onStartNew: () => setState(() => _forceNewRequest = true),
+        );
+      }
+    }
+
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: AppBar(
         title: Text('Get Verified',
-            style: GoogleFonts.syne(fontWeight: FontWeight.w700)),
+            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
       ),
       body: Column(children: [
+        if (_submitError != null)
+          Container(
+            width: double.infinity,
+            color: AppColors.error.withOpacity(0.08),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(children: [
+              const Icon(Icons.error_outline_rounded,
+                  size: 16, color: AppColors.error),
+              const SizedBox(width: 8),
+              Expanded(
+                  child: Text(_submitError!,
+                      style: const TextStyle(
+                          fontSize: 12, color: AppColors.error))),
+            ]),
+          ),
         // Progress bar
         Container(
           color: AppColors.surface,
@@ -218,12 +293,119 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
                       child: CircularProgressIndicator(
                           strokeWidth: 2, color: Colors.white))
                   : Text(_step == 3 ? 'Submit for Review' : 'Continue →',
-                      style: GoogleFonts.syne(
+                      style: GoogleFonts.plusJakartaSans(
                           fontWeight: FontWeight.w800, fontSize: 14)),
             )),
           ]),
         ),
       ]),
+    );
+  }
+}
+
+// ── REAL STATUS SCREEN ────────────────────────────────────────────────────
+// Shown instead of the wizard whenever the person already has a
+// submitted/under_review/approved/rejected request. This is the "real
+// status screen" the review asked for — status now comes from an actual
+// Firestore document a reviewer acts on, not a hard-coded success dialog.
+class _VerificationStatusScreen extends StatelessWidget {
+  final VerificationRequestModel request;
+  final VoidCallback? onStartNew;
+  const _VerificationStatusScreen({required this.request, this.onStartNew});
+
+  ({IconData icon, Color color, String title, String body}) get _content {
+    switch (request.status) {
+      case VerificationRequestStatus.submitted:
+      case VerificationRequestStatus.underReview:
+        return (
+          icon: Icons.hourglass_top_rounded,
+          color: AppColors.gold,
+          title: 'Under Review',
+          body:
+              'Your documents were submitted and are being reviewed by Propsure staff. You will hear back within 24–48 hours.',
+        );
+      case VerificationRequestStatus.approved:
+        return (
+          icon: Icons.verified_rounded,
+          color: AppColors.success,
+          title: 'Verified',
+          body:
+              'You\'re verified! Your profile and listings now carry the Propsure Verified badge.',
+        );
+      case VerificationRequestStatus.rejected:
+        return (
+          icon: Icons.cancel_rounded,
+          color: AppColors.error,
+          title: 'Not Approved',
+          body: request.rejectionReason?.isNotEmpty == true
+              ? request.rejectionReason!
+              : 'Your submission could not be approved. Please try again with clearer documents.',
+        );
+      case VerificationRequestStatus.needsChanges:
+        return (
+          icon: Icons.edit_note_rounded,
+          color: AppColors.info,
+          title: 'Changes Needed',
+          body: request.rejectionReason?.isNotEmpty == true
+              ? request.rejectionReason!
+              : 'A reviewer requested changes to your submission.',
+        );
+      case VerificationRequestStatus.expired:
+        return (
+          icon: Icons.event_busy_rounded,
+          color: AppColors.text3,
+          title: 'Verification Expired',
+          body: 'Please submit a new verification request to renew your badge.',
+        );
+      case VerificationRequestStatus.draft:
+        return (
+          icon: Icons.description_outlined,
+          color: AppColors.text3,
+          title: 'Draft',
+          body: 'Continue your verification submission.',
+        );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = _content;
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(
+          title: Text('Verification',
+              style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700))),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                  color: c.color.withOpacity(0.12), shape: BoxShape.circle),
+              child: Icon(c.icon, size: 36, color: c.color),
+            ),
+            const SizedBox(height: 16),
+            Text(c.title,
+                style:
+                    GoogleFonts.plusJakartaSans(fontSize: 20, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            Text(c.body,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 13, color: AppColors.text2)),
+            const SizedBox(height: 24),
+            if (onStartNew != null)
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: onStartNew,
+                  child: const Text('Submit New Request'),
+                ),
+              ),
+          ]),
+        ),
+      ),
     );
   }
 }
@@ -257,7 +439,7 @@ class _StepIdentity extends StatelessWidget {
             required: true),
         const SizedBox(height: 16),
         _InfoBox(
-            'Your ID is encrypted and only used for verification. It will not be shared with tenants.'),
+            'Your ID is stored in a private location only Propsure reviewers can access. It is never shown to tenants or other users.'),
       ]);
 }
 

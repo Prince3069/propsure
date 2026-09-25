@@ -9,6 +9,7 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/widgets/common_widgets.dart';
 import '../../providers/app_providers.dart';
 import '../../../data/models/listing_model.dart';
+import '../../../data/repositories/saved_search_repository.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
   final String? initialQuery;
@@ -61,7 +62,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
 
   void _apply() {
     final q = _searchCtrl.text.trim();
-    final f = ListingFilter(
+    // .withCategory normalizes whatever came in from a route link (e.g. the
+    // drawer's "?category=short-stay") to the canonical Firestore value, so
+    // the repository's exact-match `where('category', ...)` query actually
+    // finds documents instead of silently returning nothing.
+    final f = ListingFilter.withCategory(
       query: q.isNotEmpty ? q : null,
       area: _area,
       propertyType: _propertyType,
@@ -89,15 +94,103 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
     _apply();
   }
 
-  int get _activeFilters {
-    int c = 0;
-    if (_area != null) c++;
-    if (_propertyType != null) c++;
-    if (_minBeds != null) c++;
-    if (_minPrice != null || _maxPrice != null) c++;
-    if (_verifiedOnly) c++;
-    return c;
+  // ─── SAVE SEARCH (Phase 3) ───────────────────────────────────────────────
+  // Snapshots the current filter state as a SavedSearchModel. The
+  // matching side (checkSavedSearches Cloud Function) re-applies this
+  // exact filter against new listings on a schedule — see functions/
+  // index.js — so what gets saved here has to be the SAME shape the
+  // repository actually queries with, hence going through
+  // ListingFilter.withCategory rather than hand-building a map.
+  Future<void> _saveCurrentSearch() async {
+    final userId = ref.read(currentUserIdProvider);
+    if (userId == null) {
+      context.push('/auth?redirect=/search');
+      return;
+    }
+
+    final filter = ListingFilter.withCategory(
+      query:
+          _searchCtrl.text.trim().isNotEmpty ? _searchCtrl.text.trim() : null,
+      area: _area,
+      propertyType: _propertyType,
+      category: _category,
+      minBedrooms: _minBeds,
+      minPrice: _minPrice,
+      maxPrice: _maxPrice,
+      isVerified: _verifiedOnly ? true : null,
+    );
+
+    if (filter.activeFilterCount == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Add at least one filter before saving a search.')));
+      return;
+    }
+
+    final defaultLabel = [
+      if (_propertyType != null) _propertyType,
+      if (_area != null) 'in $_area',
+      if (_minBeds != null) '${_minBeds}+ beds',
+    ].where((s) => s != null).join(' · ');
+    final labelCtrl = TextEditingController(
+      text: defaultLabel.isNotEmpty ? defaultLabel : 'My search',
+    );
+
+    final label = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Save this search'),
+        content: TextField(
+          controller: labelCtrl,
+          decoration: const InputDecoration(hintText: 'Name this search'),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, labelCtrl.text.trim()),
+            child: const Text('Save & Get Alerts'),
+          ),
+        ],
+      ),
+    );
+    if (label == null || label.isEmpty || !mounted) return;
+
+    try {
+      await ref.read(savedSearchRepositoryProvider).save(
+            SavedSearchModel.fromFilter(
+                userId: userId, label: label, filter: filter),
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content:
+              const Text('Search saved — you\'ll be notified of new matches.'),
+          backgroundColor: AppColors.success,
+          action: SnackBarAction(
+              label: 'View', onPressed: () => context.push('/saved-searches')),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not save search: $e')));
+      }
+    }
   }
+
+  // Delegates to ListingFilter.activeFilterCount so the chip always matches
+  // what the repository query actually applies — previously this counted
+  // a different, narrower set of fields than the model did.
+  int get _activeFilters => ListingFilter.withCategory(
+        area: _area,
+        propertyType: _propertyType,
+        category: _category,
+        minBedrooms: _minBeds,
+        minPrice: _minPrice,
+        maxPrice: _maxPrice,
+        isVerified: _verifiedOnly ? true : null,
+      ).activeFilterCount;
 
   @override
   Widget build(BuildContext context) {
@@ -168,11 +261,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
           indicatorColor: AppColors.primary,
           labelColor: AppColors.primary,
           unselectedLabelColor: AppColors.text3,
-          labelStyle: GoogleFonts.outfit(
+          labelStyle: GoogleFonts.plusJakartaSans(
             fontSize: 11,
             fontWeight: FontWeight.w700,
           ),
-          unselectedLabelStyle: GoogleFonts.outfit(
+          unselectedLabelStyle: GoogleFonts.plusJakartaSans(
             fontSize: 11,
             fontWeight: FontWeight.w500,
           ),
@@ -219,6 +312,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
                       _apply();
                     },
                     onClear: _clear,
+                    onSaveSearch: _saveCurrentSearch,
                     isDesktop: true,
                   ),
                 ),
@@ -268,6 +362,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
                             _apply();
                           },
                           onClear: _clear,
+                          onSaveSearch: _saveCurrentSearch,
                           isDesktop: false,
                         )
                       : const SizedBox.shrink(),
@@ -363,6 +458,7 @@ class _FiltersPanel extends StatelessWidget {
   final ValueChanged<bool> onVerified;
   final ValueChanged<SortOrder> onSort;
   final VoidCallback onClear;
+  final VoidCallback onSaveSearch;
   final bool isDesktop;
 
   const _FiltersPanel({
@@ -380,6 +476,7 @@ class _FiltersPanel extends StatelessWidget {
     required this.onVerified,
     required this.onSort,
     required this.onClear,
+    required this.onSaveSearch,
     required this.isDesktop,
   });
 
@@ -400,11 +497,17 @@ class _FiltersPanel extends StatelessWidget {
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const Spacer(),
+                  IconButton(
+                    onPressed: onSaveSearch,
+                    tooltip: 'Save search & get alerts',
+                    icon: const Icon(Icons.notifications_active_outlined,
+                        size: 18, color: AppColors.primary),
+                  ),
                   GestureDetector(
                     onTap: onClear,
                     child: Text(
                       'Clear all',
-                      style: GoogleFonts.outfit(
+                      style: GoogleFonts.plusJakartaSans(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
                         color: AppColors.primary,
@@ -600,6 +703,16 @@ class _FiltersPanel extends StatelessWidget {
             ),
             if (!isDesktop) ...[
               const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: onSaveSearch,
+                  icon:
+                      const Icon(Icons.notifications_active_outlined, size: 16),
+                  label: const Text('Save search & get alerts'),
+                ),
+              ),
+              const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
                 child: TextButton(
@@ -942,17 +1055,106 @@ String _fmtShort(double price) {
 }
 
 // ─── LIST VIEW ────────────────────────────────────────────────────────────
-class _ListView extends ConsumerWidget {
+// Phase 4: switched from filteredListingsProvider (a single .snapshots()
+// capped at 30 docs, no way to ask for more — the "downloads up to N
+// active documents" scalability issue the review flagged) to
+// searchResultsControllerProvider, which cursor-paginates via
+// ListingRepository.fetchListingsPage and grows as the user scrolls.
+class _ListView extends ConsumerStatefulWidget {
   final ListingFilter filter;
   const _ListView({required this.filter});
+  @override
+  ConsumerState<_ListView> createState() => _ListViewState();
+}
+
+class _ListViewState extends ConsumerState<_ListView> {
+  final _scrollCtrl = ScrollController();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final listings = ref.watch(filteredListingsProvider(filter));
+  void initState() {
+    super.initState();
+    _scrollCtrl.addListener(_onScroll);
+    // Kick off the first page for this filter. Deferred a frame so this
+    // provider write doesn't happen mid-build of the widget that's
+    // creating this state — the standard-safe way to trigger a provider
+    // action from initState.
+    Future.microtask(() => ref
+        .read(searchResultsControllerProvider.notifier)
+        .ensureLoaded(widget.filter));
+  }
+
+  @override
+  void didUpdateWidget(covariant _ListView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.filter != widget.filter) {
+      Future.microtask(() => ref
+          .read(searchResultsControllerProvider.notifier)
+          .ensureLoaded(widget.filter));
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollCtrl.removeListener(_onScroll);
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollCtrl.position.pixels >
+        _scrollCtrl.position.maxScrollExtent - 400) {
+      ref
+          .read(searchResultsControllerProvider.notifier)
+          .loadMore(widget.filter);
+    }
+  }
+
+  void _showSortSheet() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 20, 20, 4),
+            child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Sort by',
+                    style:
+                        TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
+          ),
+          for (final entry in const {
+            'Newest first': SortOrder.newest,
+            'Oldest first': SortOrder.oldest,
+            'Price: Low to High': SortOrder.priceAsc,
+            'Price: High to Low': SortOrder.priceDesc,
+          }.entries)
+            ListTile(
+              title: Text(entry.key),
+              onTap: () {
+                Navigator.pop(context);
+                final current = ref.read(listingFilterProvider);
+                ref.read(listingFilterProvider.notifier).state =
+                    current.copyWith(sortOrder: entry.value);
+              },
+            ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final resultsAsync =
+        ref.watch(searchResultsControllerProvider)[widget.filter] ??
+            const AsyncValue.loading();
     final cols = AppBreakpoints.gridCols(context);
 
-    return listings.when(
-      data: (items) {
+    return resultsAsync.when(
+      data: (results) {
+        final items = results.items;
         if (items.isEmpty) {
           return EmptyState(
             icon: Icons.search_off_rounded,
@@ -975,7 +1177,7 @@ class _ListView extends ConsumerWidget {
               child: Row(
                 children: [
                   Text(
-                    '${items.length}',
+                    '${items.length}${results.hasMore ? '+' : ''}',
                     style: const TextStyle(
                       fontWeight: FontWeight.w800,
                       color: AppColors.text,
@@ -988,7 +1190,7 @@ class _ListView extends ConsumerWidget {
                   ),
                   const Spacer(),
                   GestureDetector(
-                    onTap: () {},
+                    onTap: _showSortSheet,
                     child: Row(
                       children: const [
                         Icon(Icons.sort_rounded,
@@ -1015,6 +1217,7 @@ class _ListView extends ConsumerWidget {
             ),
             Expanded(
               child: GridView.builder(
+                controller: _scrollCtrl,
                 padding: const EdgeInsets.all(14),
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: cols,
@@ -1022,8 +1225,20 @@ class _ListView extends ConsumerWidget {
                   mainAxisSpacing: 10,
                   childAspectRatio: cols == 1 ? 1.6 : 0.74,
                 ),
-                itemCount: items.length,
+                // +1 tail slot for the "loading more" spinner, only when
+                // there's actually another page coming.
+                itemCount: items.length + (results.hasMore ? 1 : 0),
                 itemBuilder: (ctx, i) {
+                  if (i >= items.length) {
+                    return const Center(
+                        child: Padding(
+                      padding: EdgeInsets.all(12),
+                      child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2)),
+                    ));
+                  }
                   final uid = ref.watch(currentUserIdProvider);
                   final savedIds = ref
                           .watch(currentUserModelProvider)
@@ -1064,7 +1279,30 @@ class _ListView extends ConsumerWidget {
         itemCount: 6,
         itemBuilder: (_, __) => const SkeletonCard(),
       ),
-      error: (e, _) => Center(child: Text('Error: $e')),
+      // Friendly failure state instead of dumping the raw exception (which,
+      // for a Firestore index error, includes the full console URL — not
+      // something an end user should ever see). Retry re-triggers
+      // ensureLoaded for this exact filter.
+      error: (e, _) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.error_outline_rounded,
+                size: 32, color: AppColors.text3),
+            const SizedBox(height: 10),
+            const Text('Something went wrong loading these listings.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: AppColors.text2)),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: () => ref
+                  .read(searchResultsControllerProvider.notifier)
+                  .refresh(widget.filter),
+              child: const Text('Try Again'),
+            ),
+          ]),
+        ),
+      ),
     );
   }
 }

@@ -75,7 +75,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       backgroundColor: AppColors.bg,
       appBar: AppBar(
         title: Text('Edit Profile',
-            style: GoogleFonts.syne(fontWeight: FontWeight.w700)),
+            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
         actions: [
           userAsync.whenOrNull(
                   data: (user) => TextButton(
@@ -87,7 +87,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                                 child:
                                     CircularProgressIndicator(strokeWidth: 2))
                             : Text('Save',
-                                style: GoogleFonts.syne(
+                                style: GoogleFonts.plusJakartaSans(
                                     fontWeight: FontWeight.w800,
                                     color: AppColors.primary,
                                     fontSize: 14)),
@@ -190,7 +190,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                           child: CircularProgressIndicator(
                               strokeWidth: 2, color: Colors.white))
                       : Text('Save Changes',
-                          style: GoogleFonts.syne(
+                          style: GoogleFonts.plusJakartaSans(
                               fontWeight: FontWeight.w800, fontSize: 15)),
                 )),
           ]);

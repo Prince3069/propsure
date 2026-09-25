@@ -14,11 +14,27 @@
       },
       "oauth_client": [
         {
+          "client_id": "971192083180-470dk3iahv5bkoh1sj682df5otamtdqb.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.princedevlabs.propsure",
+            "certificate_hash": "23da267252040b683465c4bf8625814e081c387b"
+          }
+        },
+        {
           "client_id": "971192083180-6rphcab6nioom533g9bgectp60k3cltk.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.princedevlabs.propsure",
             "certificate_hash": "80d0b3374ac048ace39b5275a26d94a7c0627bf2"
+          }
+        },
+        {
+          "client_id": "971192083180-gnteihla29gdl68sonbcpj5os0dl2v8u.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.princedevlabs.propsure",
+            "certificate_hash": "1210987e48b6f447d0fd5a20b4af188fd5c07e06"
           }
         },
         {

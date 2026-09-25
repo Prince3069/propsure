@@ -42,10 +42,10 @@ android {
 
     defaultConfig {
         applicationId = "com.princedevlabs.propsure"
-        minSdk        = 21
+        minSdk = flutter.minSdkVersion
         targetSdk     = 36
-        versionCode   = 4   // ← Changed from 3 to 4
-        versionName   = "1.0.3"   // ← Changed from 1.0.2 to 1.0.3
+        versionCode   = 9  // ← Changed from 3 to 4
+        versionName   = "1.0.9"   // ← Changed from 1.0.2 to 1.0.8
     }
 
     buildTypes {

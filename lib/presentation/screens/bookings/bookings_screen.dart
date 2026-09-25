@@ -21,7 +21,7 @@ class BookingsScreen extends ConsumerWidget {
       child: Scaffold(
         backgroundColor: AppColors.bg,
         appBar: AppBar(
-          title: Text('My bookings', style: GoogleFonts.syne(fontWeight: FontWeight.w800)),
+          title: Text('My bookings', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800)),
           bottom: isAgent
               ? const TabBar(
                   padding: EdgeInsets.symmetric(horizontal: 12),

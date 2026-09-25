@@ -99,7 +99,11 @@ class _EditListingScreenState extends ConsumerState<EditListingScreen> {
       _descCtrl.text = listing.description;
       _priceCtrl.text = listing.price.toStringAsFixed(0);
       _propertyType = listing.propertyType;
-      _category = listing.category;
+      // listing.category is always the canonical machine value (e.g.
+      // "for_rent"); the dropdown displays labels, so convert for display.
+      // Storing the raw machine value here caused the dropdown to show
+      // blank on every edit, since it never matched any of the label items.
+      _category = ListingCategory.fromAny(listing.category).label;
       _bedrooms = listing.bedrooms;
       _bathrooms = listing.bathrooms;
       _toilets = listing.toilets;
@@ -177,14 +181,26 @@ class _EditListingScreenState extends ConsumerState<EditListingScreen> {
     // ── Step 3: Update Firestore ──
     final allImages = [..._existingImageUrls, ...newImageUrls];
 
+    // _selectedPin is seeded from the existing listing's coordinates in
+    // _loadListing() and only changes if the user actually moves the map
+    // pin, so it should never be null here — but the old code fell back to
+    // (0, 0) if it somehow was, which is a real coordinate in the Gulf of
+    // Guinea, not "no location". Falling back to the listing's own
+    // last-known coordinates instead means a save can never corrupt the
+    // location, even in that edge case.
+    final fallbackPin = LatLng(
+        _listing!.location.latitude, _listing!.location.longitude);
+    final pin = _selectedPin ?? fallbackPin;
+
     final location = PropertyLocation(
-      latitude: _selectedPin?.latitude ?? 0,
-      longitude: _selectedPin?.longitude ?? 0,
-      geohash: _selectedPin != null
-          ? GeoFirePoint(
-                  GeoPoint(_selectedPin!.latitude, _selectedPin!.longitude))
-              .geohash
-          : '',
+      latitude: pin.latitude,
+      longitude: pin.longitude,
+      geohash: GeoFirePoint(GeoPoint(pin.latitude, pin.longitude)).geohash,
+      // Approximate when the user never touched the map pin themselves —
+      // communicates to the UI/search that this is not a precise address.
+      locationPrecision: _selectedPin != null
+          ? _listing!.location.locationPrecision
+          : 'approximate',
       area: _area!,
       city: _city ?? 'Abuja (FCT)',
       street: _addressCtrl.text.trim(),
@@ -198,7 +214,7 @@ class _EditListingScreenState extends ConsumerState<EditListingScreen> {
       'description': _descCtrl.text.trim(),
       'price': double.tryParse(_priceCtrl.text.replaceAll(',', '')) ?? 0,
       'propertyType': _propertyType ?? 'Flat / Apartment',
-      'category': _category ?? 'For Rent',
+      'category': ListingCategory.fromAny(_category).value,
       'location': location.toMap(),
       'bedrooms': _bedrooms,
       'bathrooms': _bathrooms,
@@ -473,13 +489,11 @@ class _EditListingScreenState extends ConsumerState<EditListingScreen> {
             // Category
             _PropsureDropdown<String>(
               value: _category,
-              items: const [
-                'For Rent',
-                'For Sale',
-                'Short Stay',
-                'Lease',
-                'Joint Venture'
-              ],
+              // Sourced from the canonical enum so there's exactly one
+              // place that defines what a "category" is — previously this
+              // list ('Lease', 'Joint Venture') didn't match the upload
+              // screen's list or the model's enum at all.
+              items: ListingCategory.selectable.map((c) => c.label).toList(),
               hint: 'Select category',
               icon: Icons.category_outlined,
               label: 'CATEGORY *',

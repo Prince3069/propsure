@@ -21,6 +21,13 @@ class BookingModel {
   final DateTime createdAt;
   final DateTime updatedAt;
   final bool isRated;
+  // Who actually triggered each transition — added so a state change can
+  // be audited (was previously just a bare status flip with no actor).
+  final String? confirmedBy;
+  final String? rejectedBy;
+  final String? cancelledBy;
+  final String? completedBy;
+  final DateTime? completedAt;
 
   const BookingModel({
     required this.id,
@@ -42,6 +49,11 @@ class BookingModel {
     required this.createdAt,
     required this.updatedAt,
     this.isRated = false,
+    this.confirmedBy,
+    this.rejectedBy,
+    this.cancelledBy,
+    this.completedBy,
+    this.completedAt,
   });
 
   factory BookingModel.fromFirestore(DocumentSnapshot doc) {
@@ -66,6 +78,11 @@ class BookingModel {
       createdAt: (d['createdAt'] as Timestamp).toDate(),
       updatedAt: (d['updatedAt'] as Timestamp).toDate(),
       isRated: d['isRated'] ?? false,
+      confirmedBy: d['confirmedBy'],
+      rejectedBy: d['rejectedBy'],
+      cancelledBy: d['cancelledBy'],
+      completedBy: d['completedBy'],
+      completedAt: (d['completedAt'] as Timestamp?)?.toDate(),
     );
   }
 
@@ -88,6 +105,11 @@ class BookingModel {
         'createdAt': Timestamp.fromDate(createdAt),
         'updatedAt': Timestamp.fromDate(updatedAt),
         'isRated': isRated,
+        'confirmedBy': confirmedBy,
+        'rejectedBy': rejectedBy,
+        'cancelledBy': cancelledBy,
+        'completedBy': completedBy,
+        'completedAt': completedAt != null ? Timestamp.fromDate(completedAt!) : null,
       };
 
   BookingModel copyWith({String? status, String? rejectionReason}) =>
@@ -111,6 +133,11 @@ class BookingModel {
         createdAt: createdAt,
         updatedAt: DateTime.now(),
         isRated: isRated,
+        confirmedBy: confirmedBy,
+        rejectedBy: rejectedBy,
+        cancelledBy: cancelledBy,
+        completedBy: completedBy,
+        completedAt: completedAt,
       );
 }
 
@@ -183,31 +210,37 @@ class BookingRepository {
     return BookingModel.fromFirestore(doc);
   }
 
-  Future<void> confirmBooking(String bookingId) async {
+  Future<void> confirmBooking(String bookingId, {required String actorId}) async {
     await _col.doc(bookingId).update({
       'status': AppConstants.bookingConfirmed,
+      'confirmedBy': actorId,
       'updatedAt': Timestamp.fromDate(DateTime.now()),
     });
   }
 
-  Future<void> rejectBooking(String bookingId, {String? reason}) async {
+  Future<void> rejectBooking(String bookingId,
+      {required String actorId, String? reason}) async {
     await _col.doc(bookingId).update({
       'status': AppConstants.bookingRejected,
+      'rejectedBy': actorId,
       'rejectionReason': reason ?? '',
       'updatedAt': Timestamp.fromDate(DateTime.now()),
     });
   }
 
-  Future<void> cancelBooking(String bookingId) async {
+  Future<void> cancelBooking(String bookingId, {required String actorId}) async {
     await _col.doc(bookingId).update({
       'status': AppConstants.bookingCancelled,
+      'cancelledBy': actorId,
       'updatedAt': Timestamp.fromDate(DateTime.now()),
     });
   }
 
-  Future<void> completeBooking(String bookingId) async {
+  Future<void> completeBooking(String bookingId, {required String actorId}) async {
     await _col.doc(bookingId).update({
       'status': AppConstants.bookingCompleted,
+      'completedBy': actorId,
+      'completedAt': Timestamp.fromDate(DateTime.now()),
       'updatedAt': Timestamp.fromDate(DateTime.now()),
     });
   }

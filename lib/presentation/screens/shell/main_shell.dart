@@ -211,6 +211,11 @@ class _PropsureDrawer extends ConsumerWidget {
     final user = ref.watch(currentUserModelProvider).value;
     final isAgent = user?.role == AppConstants.roleAgent ||
         user?.role == AppConstants.roleLandlord;
+    // Real counts instead of the hard-coded '3' / '5' badges the review
+    // flagged — these are the same providers the bottom nav and
+    // notifications screen already use.
+    final unreadChats = ref.watch(totalUnreadProvider).value ?? 0;
+    final unreadNotifs = ref.watch(notificationsUnreadCountProvider).value ?? 0;
 
     return Drawer(
       width: MediaQuery.of(context).size.width * 0.82,
@@ -255,7 +260,7 @@ class _PropsureDrawer extends ConsumerWidget {
                       isSignedIn && user != null
                           ? user.name
                           : 'Welcome to Propsure',
-                      style: GoogleFonts.syne(
+                      style: GoogleFonts.plusJakartaSans(
                           fontSize: 15,
                           fontWeight: FontWeight.w800,
                           color: AppColors.text),
@@ -307,7 +312,7 @@ class _PropsureDrawer extends ConsumerWidget {
                   color: AppColors.primaryPale2,
                   iconColor: AppColors.primary,
                   label: 'Messages',
-                  badge: '3',
+                  badge: unreadChats > 0 ? '$unreadChats' : null,
                   onTap: () {
                     Navigator.pop(context);
                     context.go('/messages');
@@ -322,11 +327,21 @@ class _PropsureDrawer extends ConsumerWidget {
                     context.push('/saved');
                   }),
               _DrawerItem(
+                  icon: Icons.notifications_active_outlined,
+                  color: const Color(0xFFEFF6FF),
+                  iconColor: AppColors.info,
+                  label: 'Saved Searches',
+                  subtitle: 'Get alerted on new matches',
+                  onTap: () {
+                    Navigator.pop(context);
+                    context.push('/saved-searches');
+                  }),
+              _DrawerItem(
                   icon: Icons.notifications_outlined,
                   color: const Color(0xFFEFF6FF),
                   iconColor: AppColors.info,
                   label: 'Notifications',
-                  badge: '5',
+                  badge: unreadNotifs > 0 ? '$unreadNotifs' : null,
                   onTap: () {
                     Navigator.pop(context);
                     context.push('/notifications');
@@ -362,7 +377,7 @@ class _PropsureDrawer extends ConsumerWidget {
                     subtitle: 'Manage properties',
                     onTap: () {
                       Navigator.pop(context);
-                      context.push('/search');
+                      context.push('/profile/listings');
                     }),
             ]),
             // Premium CTA
@@ -376,7 +391,7 @@ class _PropsureDrawer extends ConsumerWidget {
                 leading: const Icon(Icons.workspace_premium_outlined,
                     color: Colors.white, size: 22),
                 title: Text('Go Premium Agent',
-                    style: GoogleFonts.syne(
+                    style: GoogleFonts.plusJakartaSans(
                         fontSize: 13,
                         fontWeight: FontWeight.w800,
                         color: Colors.white)),
@@ -384,7 +399,10 @@ class _PropsureDrawer extends ConsumerWidget {
                     style: TextStyle(fontSize: 10, color: Colors.white70)),
                 trailing: const Icon(Icons.chevron_right_rounded,
                     color: Colors.white60),
-                onTap: () => Navigator.pop(context),
+                onTap: () {
+                  Navigator.pop(context);
+                  context.push('/payment/premium');
+                },
               ),
             ),
             const Divider(height: 1),
@@ -425,13 +443,6 @@ class _PropsureDrawer extends ConsumerWidget {
                     Navigator.pop(context);
                     context.push('/search?category=commercial');
                   }),
-              _DrawerItem(
-                  icon: Icons.badge_outlined,
-                  color: AppColors.primaryPale2,
-                  iconColor: AppColors.primary,
-                  label: 'Agent Directory',
-                  subtitle: 'Find verified agents',
-                  onTap: () => Navigator.pop(context)),
             ]),
             const Divider(height: 1),
             _DrawerSection('SUPPORT & INFO', [
@@ -441,31 +452,46 @@ class _PropsureDrawer extends ConsumerWidget {
                   iconColor: AppColors.primary,
                   label: 'How We Verify Agents',
                   subtitle: '5-step process',
-                  onTap: () => Navigator.pop(context)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    context.push('/info/how-we-verify');
+                  }),
               _DrawerItem(
                   icon: Icons.security_outlined,
                   color: const Color(0xFFFEF3C7),
                   iconColor: AppColors.gold,
                   label: 'Safety Tips',
-                  onTap: () => Navigator.pop(context)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    context.push('/info/safety');
+                  }),
               _DrawerItem(
                   icon: Icons.help_outline_rounded,
                   color: const Color(0xFFEFF6FF),
                   iconColor: AppColors.info,
                   label: 'FAQ',
-                  onTap: () => Navigator.pop(context)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    context.push('/info/faq');
+                  }),
               _DrawerItem(
                   icon: Icons.chat_outlined,
                   color: AppColors.bg,
                   iconColor: AppColors.text2,
                   label: 'Contact Us',
-                  onTap: () => Navigator.pop(context)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    context.push('/info/contact');
+                  }),
               _DrawerItem(
                   icon: Icons.info_outline_rounded,
                   color: AppColors.bg,
                   iconColor: AppColors.text2,
                   label: 'About Propsure',
-                  onTap: () => Navigator.pop(context)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    context.push('/info/about');
+                  }),
             ]),
             const SizedBox(height: 16),
             if (isSignedIn)
@@ -504,13 +530,13 @@ class _DrawerSection extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+        padding: const EdgeInsets.fromLTRB(20, 18, 16, 8),
         child: Text(label,
-            style: GoogleFonts.outfit(
-                fontSize: 9,
+            style: GoogleFonts.plusJakartaSans(
+                fontSize: 10,
                 fontWeight: FontWeight.w800,
                 color: AppColors.text3,
-                letterSpacing: 0.8)),
+                letterSpacing: 1.0)),
       ),
       ...items,
     ]);
@@ -534,39 +560,71 @@ class _DrawerItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      dense: true,
-      leading: Container(
-        width: 36,
-        height: 36,
-        decoration:
-            BoxDecoration(color: color, borderRadius: BorderRadius.circular(9)),
-        child: Icon(icon, size: 18, color: iconColor),
+    // Visual polish pass: the old ListTiles butted up against each other
+    // with no breathing room and no pressed-state feedback, which is likely
+    // what read as "not looking nice." Wrapping each item in its own
+    // rounded, margined container gives it a card-like feel consistent
+    // with the rest of the app (ListingCard, buttons, etc. all use
+    // AppRadius-style rounded corners), and InkWell gives real tap
+    // feedback instead of the flat default.
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            child: Row(children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                    color: color, borderRadius: BorderRadius.circular(10)),
+                child: Icon(icon, size: 18, color: iconColor),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label,
+                        style: GoogleFonts.plusJakartaSans(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.text)),
+                    if (subtitle != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: Text(subtitle!,
+                            style: const TextStyle(
+                                fontSize: 10, color: AppColors.text3)),
+                      ),
+                  ],
+                ),
+              ),
+              if (badge != null)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      borderRadius: BorderRadius.circular(99)),
+                  child: Text(badge!,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800)),
+                )
+              else
+                const Icon(Icons.chevron_right_rounded,
+                    size: 16, color: AppColors.text3),
+            ]),
+          ),
+        ),
       ),
-      title: Text(label,
-          style: GoogleFonts.outfit(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: AppColors.text)),
-      subtitle: subtitle != null
-          ? Text(subtitle!,
-              style: const TextStyle(fontSize: 10, color: AppColors.text3))
-          : null,
-      trailing: badge != null
-          ? Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-              decoration: BoxDecoration(
-                  color: AppColors.primary,
-                  borderRadius: BorderRadius.circular(99)),
-              child: Text(badge!,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800)),
-            )
-          : const Icon(Icons.chevron_right_rounded,
-              size: 16, color: AppColors.text3),
-      onTap: onTap,
     );
   }
 }
@@ -642,7 +700,7 @@ class _DesktopSidebar extends StatelessWidget {
                     child: Text('🏡', style: TextStyle(fontSize: 18)))),
             const SizedBox(width: 9),
             Text('Propsure',
-                style: GoogleFonts.syne(
+                style: GoogleFonts.plusJakartaSans(
                     fontSize: 18,
                     fontWeight: FontWeight.w800,
                     color: AppColors.primary,

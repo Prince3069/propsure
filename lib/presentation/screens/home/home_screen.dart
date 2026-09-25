@@ -237,7 +237,7 @@ class _HeroCarousel extends StatelessWidget {
                             const SizedBox(height: 6),
                             Text(
                               item['title'] ?? '',
-                              style: GoogleFonts.syne(
+                              style: GoogleFonts.plusJakartaSans(
                                 fontSize: 18,
                                 fontWeight: FontWeight.w800,
                                 color: Colors.white,
@@ -383,9 +383,13 @@ class _TopBar extends ConsumerWidget {
             ),
 
             // ── Search Hero ──
+            // Visual refresh: added the same soft decorative circles your
+            // "Find Your Dream Home" promo carousel card already uses
+            // (image 3 in your screenshots) — the hero itself had none,
+            // which made it look flatter than the card right below it.
+            // Same green/white/green palette throughout, just more depth.
             Container(
               margin: const EdgeInsets.fromLTRB(12, 0, 12, 14),
-              padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
                   colors: [AppColors.primaryDark, AppColors.primary],
@@ -393,27 +397,72 @@ class _TopBar extends ConsumerWidget {
                 borderRadius: BorderRadius.circular(AppRadius.lg),
                 boxShadow: AppShadows.md,
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Find your next place',
-                    style: GoogleFonts.syne(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
-                      letterSpacing: -0.5,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+                child: Stack(
+                  children: [
+                    Positioned(
+                      top: -30,
+                      right: -30,
+                      child: Container(
+                        width: 130,
+                        height: 130,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white.withOpacity(0.06),
+                        ),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Verified homes, transparent agents, better moves.',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.white.withOpacity(0.8),
+                    Positioned(
+                      bottom: -50,
+                      right: 40,
+                      child: Container(
+                        width: 90,
+                        height: 90,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white.withOpacity(0.05),
+                        ),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 14),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(7),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Icon(Icons.home_rounded,
+                                    color: Colors.white, size: 16),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Find your next place',
+                                style: GoogleFonts.plusJakartaSans(
+                                  fontSize: 21,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white,
+                                  letterSpacing: -0.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            'Verified homes, transparent agents, better moves.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white.withOpacity(0.8),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
 
                   // Search container
                   Container(
@@ -515,12 +564,20 @@ class _TopBar extends ConsumerWidget {
                   ),
                   const SizedBox(height: 14),
 
-                  // Filter chips
+                  // Filter chips — added a small icon per chip and a
+                  // subtle shadow on the selected one, for a bit more
+                  // visual interest than plain text pills.
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     child: Row(
-                      children: ['All', 'For Rent', 'For Sale', 'Short Stay']
-                          .map((t) {
+                      children: const <String, IconData>{
+                        'All': Icons.apps_rounded,
+                        'For Rent': Icons.key_outlined,
+                        'For Sale': Icons.sell_outlined,
+                        'Short Stay': Icons.hotel_outlined,
+                      }.entries.map((entry) {
+                        final t = entry.key;
+                        final icon = entry.value;
                         final selected = t == typeFilter;
                         return Padding(
                           padding: const EdgeInsets.only(right: 8),
@@ -529,7 +586,7 @@ class _TopBar extends ConsumerWidget {
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 160),
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
+                                horizontal: 13,
                                 vertical: 8,
                               ),
                               decoration: BoxDecoration(
@@ -543,26 +600,50 @@ class _TopBar extends ConsumerWidget {
                                       ? Colors.white
                                       : Colors.white.withOpacity(0.2),
                                 ),
+                                boxShadow: selected
+                                    ? [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.12),
+                                          blurRadius: 6,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ]
+                                    : null,
                               ),
-                              child: Text(
-                                t,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  color: selected
-                                      ? AppColors.primary
-                                      : Colors.white,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(icon,
+                                      size: 13,
+                                      color: selected
+                                          ? AppColors.primary
+                                          : Colors.white),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    t,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: selected
+                                          ? AppColors.primary
+                                          : Colors.white,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                                  ),
                                 ),
-                              ),
-                            ),
-                          ),
-                        );
-                      }).toList(),
+                              );
+                            }).toList(),
                     ),
                   ),
                 ],
               ),
             ),
+                    ],
+                  ),
+                ),
+              ),
 
             // ── Trust banner ──
             GestureDetector(
@@ -572,19 +653,27 @@ class _TopBar extends ConsumerWidget {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: AppColors.surface,
+                  color: AppColors.primaryPale2,
                   borderRadius: BorderRadius.circular(AppRadius.md),
-                  border: Border.all(color: AppColors.border),
+                  border: Border.all(color: AppColors.primary.withOpacity(0.15)),
                 ),
-                child: const Row(
+                child: Row(
                   children: [
-                    Icon(
-                      Icons.verified_user_outlined,
-                      color: AppColors.primary,
-                      size: 18,
+                    Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: const Icon(
+                        Icons.verified_user_outlined,
+                        color: AppColors.primary,
+                        size: 16,
+                      ),
                     ),
-                    SizedBox(width: 9),
-                    Expanded(
+                    const SizedBox(width: 10),
+                    const Expanded(
                       child: Text(
                         'Every agent is verified before they list',
                         style: TextStyle(
@@ -594,9 +683,9 @@ class _TopBar extends ConsumerWidget {
                         ),
                       ),
                     ),
-                    Icon(
+                    const Icon(
                       Icons.chevron_right_rounded,
-                      color: AppColors.text3,
+                      color: AppColors.primary,
                       size: 19,
                     ),
                   ],
@@ -968,7 +1057,14 @@ class _FeaturedSection extends ConsumerWidget {
             data: (all) {
               var items = all.where((l) => l.isFeatured).toList();
               if (typeFilter != null) {
-                final f = items.where((l) => l.category == typeFilter).toList();
+                // typeFilter here is the raw chip label ("For Rent") from
+                // the home screen's toggle — l.category is always the
+                // canonical value ("for_rent"). Comparing them directly
+                // (the old code) always failed, so this filter silently
+                // did nothing and every chip showed the same unfiltered
+                // list. Normalizing both sides fixes it.
+                final wanted = ListingCategory.fromAny(typeFilter).value;
+                final f = items.where((l) => l.category == wanted).toList();
                 if (f.isNotEmpty) items = f;
               }
               final src = items.isEmpty ? all.take(6).toList() : items;
@@ -1054,7 +1150,11 @@ class _VerifiedSection extends ConsumerWidget {
             data: (all) {
               var items = all.where((l) => l.isVerified);
               if (typeFilter != null) {
-                items = items.where((l) => l.category == typeFilter);
+                // Same normalization fix as _FeaturedSection above — see
+                // that comment for why the raw string comparison never
+                // actually filtered anything.
+                final wanted = ListingCategory.fromAny(typeFilter).value;
+                items = items.where((l) => l.category == wanted);
               }
               final src = items.take(cols * 2).toList();
               if (src.isEmpty) return const SizedBox.shrink();
@@ -1139,7 +1239,7 @@ class _CTABanner extends StatelessWidget {
                   children: [
                     Text(
                       'List your property FREE',
-                      style: GoogleFonts.syne(
+                      style: GoogleFonts.plusJakartaSans(
                         fontSize: 14,
                         fontWeight: FontWeight.w800,
                         color: Colors.white,
@@ -1169,13 +1269,22 @@ class _RecentSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final filter = ListingFilter(
+    // .withCategory normalizes the raw chip label ("For Rent") to the
+    // canonical Firestore value — same fix as search_screen.dart's _apply().
+    final filter = ListingFilter.withCategory(
       category: typeFilter == 'All' ? null : typeFilter,
       area: areaFilter,
     );
     final listingsAsync = ref.watch(filteredListingsProvider(filter));
-    final cols = AppBreakpoints.gridCols(context);
 
+    // Redesigned to match Featured/Verified's horizontal card row instead
+    // of a full-width vertical stack — those two sections were already
+    // the nicer-looking part of this screen, so this now reuses that
+    // exact pattern instead of a third, inconsistent layout. Also fixes
+    // a real bug: this was the only section on the home screen that
+    // rendered the raw exception text (including full Firestore index
+    // -creation URLs) straight to the screen on error, instead of
+    // failing quietly like every other section does.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1186,33 +1295,18 @@ class _RecentSection extends ConsumerWidget {
             onSeeAll: () => context.push('/search'),
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14),
+        SizedBox(
+          height: 270,
           child: listingsAsync.when(
-            loading: () => GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: cols,
-                crossAxisSpacing: 10,
-                mainAxisSpacing: 10,
-                childAspectRatio: 0.75,
-              ),
-              itemCount: 6,
-              itemBuilder: (_, __) => const SkeletonCard(),
+            loading: () => ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              scrollDirection: Axis.horizontal,
+              itemCount: 3,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (_, __) =>
+                  const SizedBox(width: 185, child: SkeletonCard()),
             ),
-            error: (e, _) => Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Text(
-                  '$e',
-                  style: const TextStyle(
-                    color: AppColors.error,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-            ),
+            error: (_, __) => const SizedBox.shrink(),
             data: (items) {
               if (items.isEmpty) {
                 return const EmptyState(
@@ -1221,16 +1315,11 @@ class _RecentSection extends ConsumerWidget {
                   subtitle: 'Be the first to list a property!',
                 );
               }
-              return GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: cols,
-                  crossAxisSpacing: 10,
-                  mainAxisSpacing: 10,
-                  childAspectRatio: cols == 1 ? 1.6 : 0.75,
-                ),
+              return ListView.separated(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                scrollDirection: Axis.horizontal,
                 itemCount: items.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
                 itemBuilder: (ctx, i) {
                   final savedIds = ref
                           .watch(currentUserModelProvider)
@@ -1238,22 +1327,25 @@ class _RecentSection extends ConsumerWidget {
                           ?.savedListings ??
                       [];
                   final uid = ref.watch(currentUserIdProvider);
-                  return ListingCard(
-                    listing: items[i],
-                    onTap: () => ctx.push('/listing/${items[i].id}'),
-                    isSaved: savedIds.contains(items[i].id),
-                    onSaveTap: uid == null
-                        ? () => ctx.push('/auth')
-                        : () {
-                            final repo = ref.read(listingRepositoryProvider);
-                            if (savedIds.contains(items[i].id)) {
-                              repo.unsaveListing(
-                                  userId: uid, listingId: items[i].id);
-                            } else {
-                              repo.saveListing(
-                                  userId: uid, listingId: items[i].id);
-                            }
-                          },
+                  return SizedBox(
+                    width: 190,
+                    child: ListingCard(
+                      listing: items[i],
+                      onTap: () => ctx.push('/listing/${items[i].id}'),
+                      isSaved: savedIds.contains(items[i].id),
+                      onSaveTap: uid == null
+                          ? () => ctx.push('/auth')
+                          : () {
+                              final repo = ref.read(listingRepositoryProvider);
+                              if (savedIds.contains(items[i].id)) {
+                                repo.unsaveListing(
+                                    userId: uid, listingId: items[i].id);
+                              } else {
+                                repo.saveListing(
+                                    userId: uid, listingId: items[i].id);
+                              }
+                            },
+                    ),
                   );
                 },
               );

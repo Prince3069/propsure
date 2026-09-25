@@ -246,4 +246,29 @@ class ChatRepository {
   Future<void> archiveChat(String chatId) async {
     await _chats.doc(chatId).update({'isArchived': true});
   }
+
+  // ── Block / mute (review 2.6 "report, block, and moderation flows") ──
+  Future<void> blockChat(String chatId, String myUid) async {
+    await _chats
+        .doc(chatId)
+        .update({'blockedBy': FieldValue.arrayUnion([myUid])});
+  }
+
+  Future<void> unblockChat(String chatId, String myUid) async {
+    await _chats
+        .doc(chatId)
+        .update({'blockedBy': FieldValue.arrayRemove([myUid])});
+  }
+
+  Future<void> muteChat(String chatId, String myUid) async {
+    await _chats
+        .doc(chatId)
+        .update({'mutedBy': FieldValue.arrayUnion([myUid])});
+  }
+
+  Future<void> unmuteChat(String chatId, String myUid) async {
+    await _chats
+        .doc(chatId)
+        .update({'mutedBy': FieldValue.arrayRemove([myUid])});
+  }
 }

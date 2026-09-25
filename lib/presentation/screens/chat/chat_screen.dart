@@ -49,6 +49,86 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         .markMessagesAsRead(chatId: widget.chatId, userId: userId);
   }
 
+  // ─── REPORT / BLOCK — previously the AppBar menu had these two items
+  // wired to `onSelected: (v) {}`, i.e. literally nothing happened when
+  // tapped. ───
+  Future<void> _reportUser(String otherId, String otherName) async {
+    final userId = ref.read(currentUserIdProvider);
+    if (userId == null || otherId.isEmpty) return;
+    final reason = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Report $otherName',
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+            ),
+          ),
+          for (final reason in const [
+            'Scam or fraud',
+            'Harassment or abuse',
+            'Spam',
+            'Impersonation',
+            'Something else',
+          ])
+            ListTile(title: Text(reason), onTap: () => Navigator.pop(context, reason)),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+    if (reason == null || !mounted) return;
+    try {
+      await ref.read(reportRepositoryProvider).submitReport(
+            reporterId: userId,
+            targetType: 'agent',
+            targetId: otherId,
+            reason: reason,
+            note: 'Filed from chat ${widget.chatId}',
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Report submitted. Thank you.')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not submit report: $e')));
+      }
+    }
+  }
+
+  Future<void> _toggleBlock(bool currentlyBlocked) async {
+    final userId = ref.read(currentUserIdProvider);
+    if (userId == null) return;
+    final repo = ref.read(chatRepositoryProvider);
+    if (currentlyBlocked) {
+      await repo.unblockChat(widget.chatId, userId);
+    } else {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Block this conversation?'),
+          content: const Text(
+              "You won't be able to send messages here until you unblock it."),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel')),
+            TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Block', style: TextStyle(color: AppColors.error))),
+          ],
+        ),
+      );
+      if (confirm == true) await repo.blockChat(widget.chatId, userId);
+    }
+  }
+
   Future<void> _send() async {
     final text = _msgCtrl.text.trim();
     if (text.isEmpty || _sending) return;
@@ -133,8 +213,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       appBar: _ChatAppBar(
         name: otherName, photo: otherPhoto, chatId: widget.chatId,
         agentPhone: '', // fetched from listing if needed
+        isBlockedByMe: chat?.isBlockedBy(userId) ?? false,
+        onReport: () => _reportUser(otherId, otherName),
+        onBlockToggle: () => _toggleBlock(chat?.isBlockedBy(userId) ?? false),
       ),
       body: Column(children: [
+        if (chat?.isBlockedBy(userId) ?? false)
+          Container(
+            width: double.infinity,
+            color: AppColors.error.withOpacity(0.08),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(children: [
+              const Icon(Icons.block_rounded, size: 16, color: AppColors.error),
+              const SizedBox(width: 8),
+              const Expanded(
+                  child: Text('You blocked this conversation. Unblock to reply.',
+                      style: TextStyle(fontSize: 12, color: AppColors.error))),
+              TextButton(
+                onPressed: () => _toggleBlock(true),
+                child: const Text('Unblock'),
+              ),
+            ]),
+          ),
         // Listing context bar
         if (chat?.listingTitle != null)
           _ListingContextBar(
@@ -178,18 +278,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               );
             },
             loading: () => const Center(child: CircularProgressIndicator()),
-            error: (e, _) => Center(child: Text('$e')),
+            // Friendly failure state instead of the raw exception.
+            error: (e, _) => const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text('Couldn\'t load this conversation.',
+                    style: TextStyle(fontSize: 13, color: AppColors.text3)),
+              ),
+            ),
           ),
         ),
-        // Input bar
-        _ChatInputBar(
-          controller: _msgCtrl,
-          hasText: _hasText,
-          sending: _sending,
-          sendingImage: _sendingImage,
-          onSend: _send,
-          onImagePick: _sendImage,
-        ),
+        // Input bar — hidden once the current user has blocked this
+        // conversation, so they can't send further messages until they
+        // unblock (the banner above gives them that action).
+        if (!(chat?.isBlockedBy(userId) ?? false))
+          _ChatInputBar(
+            controller: _msgCtrl,
+            hasText: _hasText,
+            sending: _sending,
+            sendingImage: _sendingImage,
+            onSend: _send,
+            onImagePick: _sendImage,
+          ),
       ]),
     );
   }
@@ -214,11 +324,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   final String name, chatId, agentPhone;
   final String? photo;
+  final bool isBlockedByMe;
+  final VoidCallback onReport;
+  final VoidCallback onBlockToggle;
   const _ChatAppBar(
       {required this.name,
       this.photo,
       required this.chatId,
-      required this.agentPhone});
+      required this.agentPhone,
+      this.isBlockedByMe = false,
+      required this.onReport,
+      required this.onBlockToggle});
 
   @override
   Size get preferredSize => const Size.fromHeight(kToolbarHeight);
@@ -251,7 +367,7 @@ class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(name,
-              style: GoogleFonts.syne(
+              style: GoogleFonts.plusJakartaSans(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
                   color: AppColors.text)),
@@ -273,10 +389,15 @@ class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
           ),
         PopupMenuButton<String>(
           icon: const Icon(Icons.more_vert_rounded),
-          onSelected: (v) {},
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 'report', child: Text('Report')),
-            PopupMenuItem(value: 'block', child: Text('Block')),
+          onSelected: (v) {
+            if (v == 'report') onReport();
+            if (v == 'block') onBlockToggle();
+          },
+          itemBuilder: (_) => [
+            const PopupMenuItem(value: 'report', child: Text('Report')),
+            PopupMenuItem(
+                value: 'block',
+                child: Text(isBlockedByMe ? 'Unblock' : 'Block')),
           ],
         ),
       ],

@@ -12,6 +12,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
 import '../../../core/constants/app_theme.dart';
 import '../../../core/constants/app_constants.dart';
+import '../../../core/constants/listing_category.dart';
 import '../../providers/app_providers.dart';
 
 class BulkUploadScreen extends ConsumerStatefulWidget {
@@ -164,38 +165,55 @@ class _BulkUploadScreenState extends ConsumerState<BulkUploadScreen> {
                 .toList();
 
         final area = row['area'] as String? ?? 'Abuja';
+        // Fixes applied here (Phase 3):
+        // 1. Category was writing the raw CSV/label value straight into
+        //    Firestore ("For Rent") — the exact same bug fixed everywhere
+        //    else in Phase 1, just reintroduced by this screen writing a
+        //    hand-rolled map instead of going through ListingModel/
+        //    ListingCategory. Normalized here too.
+        // 2. Was publishing with `status: 'active'` immediately, with
+        //    zero photos (`images: []`), the moment the CSV parsed. The
+        //    review is explicit: "Do not allow bulk imports to bypass
+        //    verification, media rules, freshness, or moderation" and
+        //    "Import as drafts. Require supplier confirmation before
+        //    publishing." Every row now lands as `status: 'draft'` —
+        //    invisible to search/home/everyone but the importing agent —
+        //    until they review it and add photos from My Listings > Drafts.
         await db.collection(AppConstants.colListings).doc(uuid.v4()).set({
           'title': row['title'],
           'description': row['description'] ?? '',
           'price': row['price'],
           'propertyType': row['property_type'] ?? 'Flat / Apartment',
-          'category': row['category'] ?? 'For Rent',
+          'category': ListingCategory.fromAny(row['category'] as String?).value,
           'bedrooms': row['bedrooms'],
           'bathrooms': row['bathrooms'],
           'toilets': row['toilets'],
           'isFurnished':
               (row['furnished'] as String? ?? '').toLowerCase() == 'yes',
-          'condition': row['condition'] ?? 'New',
           'amenities': amenities,
           'area': area,
           'city': row['city'] ?? 'Abuja',
-          'state': 'FCT',
           'location': {
             'area': area,
             'city': row['city'] ?? 'Abuja',
             'state': 'FCT',
+            'country': 'Nigeria',
             'fullAddress': '$area, ${row['city'] ?? "Abuja"}, FCT',
             'latitude': AppConstants.abujaLat,
             'longitude': AppConstants.abujaLng,
+            // These coordinates are the Abuja area center, not a real
+            // pin — matches the locationPrecision fix from Phase 1.
+            'locationPrecision': 'approximate',
           },
           'agentId': user.uid,
           'agentName': user.name,
           'agentPhone': user.phone,
           'agentPhoto': user.profilePhoto ?? '',
           'images': <String>[],
-          'status': 'active',
-          'isVerified': false, // Bulk imports start unverified
+          'status': 'draft',
+          'isVerified': false,
           'isFeatured': false,
+          'verificationStatus': 'none',
           'source': 'bulk_upload',
           'viewCount': 0,
           'inquiryCount': 0,
@@ -219,9 +237,35 @@ class _BulkUploadScreenState extends ConsumerState<BulkUploadScreen> {
 
     setState(() {
       _uploading = false;
-      _status =
-          '✅ Done! $_uploaded uploaded${_failed > 0 ? ", $_failed failed" : ""}.';
+      _status = _failed > 0
+          ? '✅ Done! $_uploaded imported as drafts, $_failed failed.'
+          : '✅ Done! $_uploaded listings imported as drafts.';
     });
+    if (mounted && _uploaded > 0) {
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Imported as drafts'),
+          content: Text(
+              'Your $_uploaded listings were imported as drafts — they are '
+              'not visible to anyone yet. Go to My Listings > Drafts to add '
+              'photos and publish each one, or discard the ones you don\'t want.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Later'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                context.push('/profile/listings');
+              },
+              child: const Text('Review Drafts'),
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   void _downloadTemplate() {
