@@ -65,7 +65,7 @@ class _ContactSupportScreenState extends ConsumerState<ContactSupportScreen> {
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: AppBar(
-        title: Text('Contact Support', style: GoogleFonts.syne(fontWeight: FontWeight.w700)),
+        title: Text('Contact Support', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
         backgroundColor: AppColors.surface,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
@@ -92,7 +92,7 @@ class _ContactSupportScreenState extends ConsumerState<ContactSupportScreen> {
           const SizedBox(height: 20),
 
           Text('Send us a message',
-              style: GoogleFonts.syne(fontSize: 16, fontWeight: FontWeight.w700)),
+              style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w700)),
           const SizedBox(height: 4),
           const Text('We usually respond within 24 hours',
               style: TextStyle(fontSize: 12, color: AppColors.text3)),
@@ -189,7 +189,7 @@ class _SuccessView extends StatelessWidget {
             child: const Icon(Icons.check_rounded, color: Colors.white, size: 38),
           ),
           const SizedBox(height: 20),
-          Text('Message Sent!', style: GoogleFonts.syne(
+          Text('Message Sent!', style: GoogleFonts.plusJakartaSans(
               fontSize: 22, fontWeight: FontWeight.w800, color: AppColors.text)),
           const SizedBox(height: 8),
           const Text("We've received your message and will get back to you within 24 hours.",

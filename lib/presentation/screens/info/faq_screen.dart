@@ -99,7 +99,7 @@ class _FAQScreenState extends State<FAQScreen> {
                       const Icon(Icons.quiz_rounded, color: Colors.white, size: 36),
                       const SizedBox(height: 10),
                       Text('Frequently Asked Questions',
-                          style: GoogleFonts.syne(fontSize: 22,
+                          style: GoogleFonts.plusJakartaSans(fontSize: 22,
                               fontWeight: FontWeight.w800, color: Colors.white)),
                       const Text('Find answers to common questions',
                           style: TextStyle(color: Colors.white70, fontSize: 13)),

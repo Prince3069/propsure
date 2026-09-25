@@ -845,10 +845,17 @@ class _ChatInputBar extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        // Send button
-        GestureDetector(
-          onTap: (sending || !hasText) ? null : onSend,
-          child: AnimatedContainer(
+        // Send button — was a bare GestureDetector with zero tap
+        // feedback (the AnimatedContainer only reacts to hasText, not to
+        // the actual press). Material+InkWell gives a real ripple on tap
+        // with no new state needed.
+        Material(
+          color: Colors.transparent,
+          shape: const CircleBorder(),
+          child: InkWell(
+            onTap: (sending || !hasText) ? null : onSend,
+            customBorder: const CircleBorder(),
+            child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             width: 40,
             height: 40,
@@ -868,6 +875,7 @@ class _ChatInputBar extends StatelessWidget {
                 : Icon(Icons.send_rounded,
                     size: 17, color: hasText ? Colors.white : AppColors.text3),
           ),
+        ),
         ),
       ]),
     );

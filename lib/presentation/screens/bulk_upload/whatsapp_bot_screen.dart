@@ -18,7 +18,7 @@ class WhatsAppBotScreen extends StatelessWidget {
       backgroundColor: AppColors.bg,
       appBar: AppBar(
         title: Text('WhatsApp Listing Bot',
-            style: GoogleFonts.syne(fontWeight: FontWeight.w700)),
+            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
       ),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         // Hero
@@ -32,7 +32,7 @@ class WhatsAppBotScreen extends StatelessWidget {
             const Text('📲', style: TextStyle(fontSize: 40)),
             const SizedBox(height: 12),
             Text('List properties via WhatsApp',
-                style: GoogleFonts.syne(
+                style: GoogleFonts.plusJakartaSans(
                     fontSize: 20,
                     fontWeight: FontWeight.w800,
                     color: Colors.white)),
@@ -244,7 +244,7 @@ class WhatsAppBotScreen extends StatelessWidget {
                     fontWeight: FontWeight.w600)),
             const SizedBox(height: 6),
             Text(_whatsappNumber,
-                style: GoogleFonts.syne(
+                style: GoogleFonts.plusJakartaSans(
                     fontSize: 22,
                     fontWeight: FontWeight.w800,
                     color: const Color(0xFF166534))),

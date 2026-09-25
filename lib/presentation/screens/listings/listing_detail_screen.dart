@@ -385,7 +385,16 @@ class _ListingDetailScreenState extends ConsumerState<ListingDetailScreen> {
       ),
       error: (e, _) => Scaffold(
         appBar: AppBar(),
-        body: Center(child: Text('$e')),
+        // Friendly failure state instead of the raw exception — another
+        // one missed in the earlier batch pass, caught on the full
+        // project-wide re-sweep.
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text('Couldn\'t load this listing right now.',
+                style: TextStyle(fontSize: 13, color: AppColors.text3)),
+          ),
+        ),
       ),
     );
   }

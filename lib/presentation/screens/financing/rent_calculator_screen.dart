@@ -74,7 +74,7 @@ class _RentCalculatorScreenState extends ConsumerState<RentCalculatorScreen>
       backgroundColor: AppColors.bg,
       appBar: AppBar(
         title: Text('Rent Calculator',
-            style: GoogleFonts.syne(fontWeight: FontWeight.w700)),
+            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
         bottom: TabBar(
           controller: _tabs,
           tabs: const [Tab(text: 'Affordability'), Tab(text: 'Rent Financing')],
@@ -122,7 +122,7 @@ class _AffordabilityTab extends StatelessWidget {
                 affordable
                     ? '✅ This rent is affordable'
                     : '⚠️ This may be too expensive',
-                style: GoogleFonts.syne(
+                style: GoogleFonts.plusJakartaSans(
                     fontSize: 16,
                     fontWeight: FontWeight.w800,
                     color: affordable ? AppColors.primary : AppColors.error)),
@@ -306,7 +306,7 @@ class _FinancingTab extends StatelessWidget {
                     fontWeight: FontWeight.w600)),
             const SizedBox(height: 6),
             Text('₦${_fmt(s._monthlyPayment)}',
-                style: GoogleFonts.syne(
+                style: GoogleFonts.plusJakartaSans(
                     fontSize: 32,
                     fontWeight: FontWeight.w800,
                     color: AppColors.primary)),
@@ -336,17 +336,16 @@ class _FinancingTab extends StatelessWidget {
               },
               icon: const Icon(Icons.account_balance_outlined, size: 18),
               label: Text('Apply for Rent Financing',
-                  style: GoogleFonts.syne(fontWeight: FontWeight.w800)),
+                  style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800)),
               style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14)),
             )),
         const SizedBox(height: 10),
-        Center(
-            child: TextButton.icon(
-          onPressed: () {},
-          icon: const Icon(Icons.handshake_outlined, size: 16),
-          label: const Text('View our lending partners'),
-        )),
+        // Removed the "View our lending partners" link that sat here —
+        // it had `onPressed: () {}` (did nothing) and, more importantly,
+        // rent financing itself is still "coming soon" per the button
+        // above, so there's no actual partner list to show yet either.
+        // A dead promise is worse than no link at all.
       ] else
         Container(
           padding: const EdgeInsets.all(24),
@@ -394,7 +393,7 @@ class _CalcField extends StatelessWidget {
             prefixStyle: const TextStyle(
                 fontWeight: FontWeight.w700, color: AppColors.text),
           ),
-          style: GoogleFonts.syne(fontSize: 18, fontWeight: FontWeight.w700),
+          style: GoogleFonts.plusJakartaSans(fontSize: 18, fontWeight: FontWeight.w700),
         ),
       ]);
 }

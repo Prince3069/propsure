@@ -259,7 +259,7 @@ class _EditListingScreenState extends ConsumerState<EditListingScreen> {
       backgroundColor: AppColors.bg,
       appBar: AppBar(
         title: Text('Edit Listing',
-            style: GoogleFonts.syne(fontWeight: FontWeight.w700)),
+            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
         actions: [
           TextButton(
             onPressed: _saving ? null : _saveChanges,
@@ -269,7 +269,7 @@ class _EditListingScreenState extends ConsumerState<EditListingScreen> {
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2))
                 : Text('Save',
-                    style: GoogleFonts.syne(
+                    style: GoogleFonts.plusJakartaSans(
                         fontWeight: FontWeight.w800,
                         color: AppColors.primary,
                         fontSize: 14)),
@@ -283,7 +283,7 @@ class _EditListingScreenState extends ConsumerState<EditListingScreen> {
           children: [
             // ── Photos Section ──
             Text('Photos',
-                style: GoogleFonts.syne(
+                style: GoogleFonts.plusJakartaSans(
                     fontSize: 16, fontWeight: FontWeight.w700)),
             const SizedBox(height: 8),
             const Text('Tap on any photo to remove it. Add new photos below.',
@@ -440,7 +440,7 @@ class _EditListingScreenState extends ConsumerState<EditListingScreen> {
             const SizedBox(height: 16),
 
             Text('Property Details',
-                style: GoogleFonts.syne(
+                style: GoogleFonts.plusJakartaSans(
                     fontSize: 16, fontWeight: FontWeight.w700)),
             const SizedBox(height: 12),
 
@@ -641,7 +641,7 @@ class _EditListingScreenState extends ConsumerState<EditListingScreen> {
             const SizedBox(height: 16),
 
             Text('Location',
-                style: GoogleFonts.syne(
+                style: GoogleFonts.plusJakartaSans(
                     fontSize: 16, fontWeight: FontWeight.w700)),
             const SizedBox(height: 12),
 
@@ -749,7 +749,7 @@ class _EditListingScreenState extends ConsumerState<EditListingScreen> {
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: Colors.white))
                     : Text('Save Changes',
-                        style: GoogleFonts.syne(
+                        style: GoogleFonts.plusJakartaSans(
                             fontWeight: FontWeight.w800, fontSize: 15)),
               ),
             ),

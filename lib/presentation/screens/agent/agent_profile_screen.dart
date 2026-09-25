@@ -158,6 +158,24 @@ class AgentProfileScreen extends ConsumerWidget {
                           _WhitePill(_roleLabel(agent.role)),
                         ],
                       ),
+                      // Response-rate badge — the data has existed since
+                      // the enquiry-tracking work (agentResponseRateProvider)
+                      // but was never actually surfaced anywhere a tenant
+                      // could see it. Gated on a minimum of 5 enquiries so
+                      // a single early response doesn't render as a
+                      // misleadingly perfect "100%" badge.
+                      Consumer(builder: (context, ref, _) {
+                        final enquiries = ref.watch(agentEnquiriesProvider(agentId)).value;
+                        final rate = ref.watch(agentResponseRateProvider(agentId));
+                        if (enquiries == null || enquiries.length < 5 || rate == null) {
+                          return const SizedBox.shrink();
+                        }
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: _WhitePill(
+                              '⚡ Responds to ${(rate * 100).round()}% of enquiries'),
+                        );
+                      }),
                       const SizedBox(height: 20),
 
                       // Stats

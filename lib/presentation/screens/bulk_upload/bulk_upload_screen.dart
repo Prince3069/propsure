@@ -286,7 +286,7 @@ class _BulkUploadScreenState extends ConsumerState<BulkUploadScreen> {
       backgroundColor: AppColors.bg,
       appBar: AppBar(
         title: Text('Bulk Upload Listings',
-            style: GoogleFonts.syne(fontWeight: FontWeight.w700)),
+            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -454,7 +454,7 @@ class _BulkUploadScreenState extends ConsumerState<BulkUploadScreen> {
                   onPressed: _uploadAll,
                   icon: const Icon(Icons.cloud_upload_rounded, size: 18),
                   label: Text('Upload ${_parsed.length} Listings',
-                      style: GoogleFonts.syne(
+                      style: GoogleFonts.plusJakartaSans(
                           fontWeight: FontWeight.w800, fontSize: 14)),
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 15),

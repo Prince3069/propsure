@@ -70,7 +70,7 @@ class _ContactScreenState extends ConsumerState<ContactScreen> {
       backgroundColor: AppColors.bg,
       appBar: AppBar(
         title: Text('Contact Support',
-            style: GoogleFonts.syne(fontWeight: FontWeight.w700)),
+            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
         backgroundColor: AppColors.surface,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
@@ -123,7 +123,7 @@ class _FormView extends StatelessWidget {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Icon(Icons.support_agent_rounded, color: Colors.white, size: 32),
             const SizedBox(height: 10),
-            Text("We're here to help!", style: GoogleFonts.syne(
+            Text("We're here to help!", style: GoogleFonts.plusJakartaSans(
                 fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white)),
             const SizedBox(height: 4),
             const Text('We respond to all messages within 24 hours.',
@@ -253,7 +253,7 @@ class _SuccessView extends StatelessWidget {
               color: AppColors.primary, size: 44),
         ),
         const SizedBox(height: 20),
-        Text('Message Sent!', style: GoogleFonts.syne(
+        Text('Message Sent!', style: GoogleFonts.plusJakartaSans(
             fontSize: 22, fontWeight: FontWeight.w800, color: AppColors.text)),
         const SizedBox(height: 8),
         const Text(

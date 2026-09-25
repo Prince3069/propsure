@@ -46,7 +46,7 @@ class AboutPropsureScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 14),
                         Text('About Propsure',
-                            style: GoogleFonts.syne(
+                            style: GoogleFonts.plusJakartaSans(
                                 fontSize: 28, fontWeight: FontWeight.w800,
                                 color: Colors.white)),
                         const SizedBox(height: 4),
@@ -104,7 +104,7 @@ class AboutPropsureScreen extends StatelessWidget {
                         ),
                         child: Column(children: [
                           Text('Propsure in Numbers',
-                              style: GoogleFonts.syne(
+                              style: GoogleFonts.plusJakartaSans(
                                   fontSize: 16, fontWeight: FontWeight.w800,
                                   color: Colors.white)),
                           const SizedBox(height: 16),
@@ -139,7 +139,7 @@ class AboutPropsureScreen extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text('Get in Touch',
-                                style: GoogleFonts.syne(
+                                style: GoogleFonts.plusJakartaSans(
                                     fontSize: 15, fontWeight: FontWeight.w700)),
                             const SizedBox(height: 12),
                             _ContactRow(Icons.email_outlined,   'hello@propsure.africa'),
@@ -182,7 +182,7 @@ class AboutPropsureScreen extends StatelessWidget {
               child: Icon(icon, size: 18, color: color),
             ),
             const SizedBox(width: 10),
-            Text(title, style: GoogleFonts.syne(
+            Text(title, style: GoogleFonts.plusJakartaSans(
                 fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.text)),
           ]),
           const SizedBox(height: 10),
@@ -199,7 +199,7 @@ class _StatCol extends StatelessWidget {
   const _StatCol(this.value, this.label);
   @override
   Widget build(BuildContext context) => Expanded(child: Column(children: [
-    Text(value, style: GoogleFonts.syne(
+    Text(value, style: GoogleFonts.plusJakartaSans(
         fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white)),
     Text(label, style: const TextStyle(fontSize: 10, color: Colors.white60)),
   ]));

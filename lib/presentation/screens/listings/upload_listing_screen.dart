@@ -350,7 +350,7 @@ class _PostTopBar extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('List Property',
-                    style: GoogleFonts.syne(
+                    style: GoogleFonts.plusJakartaSans(
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
                         color: Colors.white)),
@@ -584,7 +584,7 @@ class _StepPhotos extends StatelessWidget {
 
       // ── Photos grid ────────────────────────────────────────────────────
       Text('Photos *',
-          style: GoogleFonts.syne(fontSize: 14, fontWeight: FontWeight.w700)),
+          style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w700)),
       const SizedBox(height: 4),
       const Text('Add at least 1 photo. More photos = more inquiries.',
           style: TextStyle(fontSize: 12, color: AppColors.text3)),
@@ -677,7 +677,7 @@ class _StepPhotos extends StatelessWidget {
 
       // ── Video ────────────────────────────────────────────────────────────
       Text('Video (Optional)',
-          style: GoogleFonts.syne(fontSize: 14, fontWeight: FontWeight.w700)),
+          style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w700)),
       const SizedBox(height: 8),
       if (videoFile == null)
         GestureDetector(
@@ -801,7 +801,7 @@ class _PropertyPinPicker extends StatelessWidget {
       children: [
         Text(
           'PIN THE PROPERTY LOCATION',
-          style: GoogleFonts.outfit(
+          style: GoogleFonts.plusJakartaSans(
             fontSize: 11,
             fontWeight: FontWeight.w800,
             letterSpacing: .8,
@@ -1363,7 +1363,7 @@ class _SuccessDialog extends StatelessWidget {
           const SizedBox(height: 16),
           Text('Listing Submitted!',
               style:
-                  GoogleFonts.syne(fontSize: 20, fontWeight: FontWeight.w800)),
+                  GoogleFonts.plusJakartaSans(fontSize: 20, fontWeight: FontWeight.w800)),
           const SizedBox(height: 8),
           const Text(
             'Your property is now LIVE on Propsure. Tenants can find it on the home screen right now.',

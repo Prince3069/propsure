@@ -353,7 +353,7 @@ class _MainAuthView extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           Text('Propsure',
-              style: GoogleFonts.syne(
+              style: GoogleFonts.plusJakartaSans(
                   fontSize: 20,
                   fontWeight: FontWeight.w800,
                   color: AppColors.primary)),
@@ -388,9 +388,9 @@ class _MainAuthView extends StatelessWidget {
             labelColor: AppColors.primary,
             unselectedLabelColor: AppColors.text3,
             labelStyle:
-                GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w700),
+                GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w700),
             unselectedLabelStyle:
-                GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w500),
+                GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w500),
             tabs: const [
               Tab(icon: Icon(Icons.phone_outlined, size: 16), text: 'Phone'),
               Tab(icon: Icon(Icons.email_outlined,  size: 16), text: 'Email'),
@@ -467,7 +467,7 @@ class _PhoneTabContent extends StatelessWidget {
             padding:
                 const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
             child: Text('+234',
-                style: GoogleFonts.outfit(
+                style: GoogleFonts.plusJakartaSans(
                     fontWeight: FontWeight.w700,
                     fontSize: 14,
                     color: AppColors.text)),
@@ -488,7 +488,7 @@ class _PhoneTabContent extends StatelessWidget {
                     EdgeInsets.symmetric(horizontal: 12, vertical: 14),
                 filled: false,
               ),
-              style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text),
+              style: GoogleFonts.plusJakartaSans(fontSize: 14, color: AppColors.text),
             ),
           ),
         ]),
@@ -514,7 +514,7 @@ class _PhoneTabContent extends StatelessWidget {
         const Icon(Icons.shield_outlined, size: 13, color: AppColors.text3),
         const SizedBox(width: 5),
         Text('Your number is never shared with third parties.',
-            style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
+            style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppColors.text3)),
       ]),
     ]);
   }
@@ -578,7 +578,7 @@ class _EmailTabContent extends StatelessWidget {
             hintText: 'you@example.com',
             prefixIcon: Icon(Icons.email_outlined),
           ),
-          style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text),
+          style: GoogleFonts.plusJakartaSans(fontSize: 14, color: AppColors.text),
         ),
         const SizedBox(height: 10),
 
@@ -600,7 +600,7 @@ class _EmailTabContent extends StatelessWidget {
               onPressed: onTogglePwVisible,
             ),
           ),
-          style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text),
+          style: GoogleFonts.plusJakartaSans(fontSize: 14, color: AppColors.text),
         ),
 
         // Confirm password
@@ -616,7 +616,7 @@ class _EmailTabContent extends StatelessWidget {
               hintText: 'Re-enter password',
               prefixIcon: Icon(Icons.lock_outline_rounded),
             ),
-            style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text),
+            style: GoogleFonts.plusJakartaSans(fontSize: 14, color: AppColors.text),
           ),
         ],
 
@@ -685,7 +685,7 @@ class _AuthToggleChip extends StatelessWidget {
                   : AppColors.border),
         ),
         child: Text(label,
-            style: GoogleFonts.outfit(
+            style: GoogleFonts.plusJakartaSans(
               fontSize: 12,
               fontWeight:
                   selected ? FontWeight.w700 : FontWeight.w500,
@@ -739,14 +739,14 @@ class _OtpStep extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
               child: Text('Code sent to +234 $phone',
-                  style: GoogleFonts.outfit(
+                  style: GoogleFonts.plusJakartaSans(
                       color: AppColors.primary,
                       fontWeight: FontWeight.w600,
                       fontSize: 12))),
           GestureDetector(
             onTap: onChangeNumber,
             child: Text('Change',
-                style: GoogleFonts.outfit(
+                style: GoogleFonts.plusJakartaSans(
                     color: AppColors.primary,
                     fontWeight: FontWeight.w800,
                     fontSize: 12)),
@@ -822,7 +822,7 @@ class _OtpBox extends StatelessWidget {
         maxLength: 1,
         onChanged: onChanged,
         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        style: GoogleFonts.syne(
+        style: GoogleFonts.plusJakartaSans(
             fontSize: 22, fontWeight: FontWeight.w800),
         decoration: InputDecoration(
           counterText: '',
@@ -918,7 +918,7 @@ class _ProfileStep extends StatelessWidget {
                           const TextStyle(fontSize: 22)),
                   const SizedBox(height: 5),
                   Text(label,
-                      style: GoogleFonts.outfit(
+                      style: GoogleFonts.plusJakartaSans(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
                         color: sel
@@ -972,7 +972,7 @@ class _ErrorBox extends StatelessWidget {
         const SizedBox(width: 7),
         Expanded(
             child: Text(msg,
-                style: GoogleFonts.outfit(
+                style: GoogleFonts.plusJakartaSans(
                     color: AppColors.error, fontSize: 12))),
       ]),
     );

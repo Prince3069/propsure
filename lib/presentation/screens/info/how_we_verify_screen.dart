@@ -39,7 +39,7 @@ class HowWeVerifyScreen extends StatelessWidget {
                           color: Colors.white, size: 32),
                     ),
                     const SizedBox(height: 12),
-                    Text('How We Verify Agents', style: GoogleFonts.syne(
+                    Text('How We Verify Agents', style: GoogleFonts.plusJakartaSans(
                         fontSize: 24, fontWeight: FontWeight.w800, color: Colors.white)),
                     const Text('Our 5-step trust framework',
                         style: TextStyle(color: Colors.white70, fontSize: 13)),
@@ -72,7 +72,7 @@ class HowWeVerifyScreen extends StatelessWidget {
               ),
               const SizedBox(height: 24),
 
-              Text('Verification Steps', style: GoogleFonts.syne(
+              Text('Verification Steps', style: GoogleFonts.plusJakartaSans(
                   fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.text)),
               const SizedBox(height: 14),
 
@@ -85,7 +85,7 @@ class HowWeVerifyScreen extends StatelessWidget {
               const SizedBox(height: 24),
 
               // Badge types
-              Text('Verification Badges', style: GoogleFonts.syne(
+              Text('Verification Badges', style: GoogleFonts.plusJakartaSans(
                   fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.text)),
               const SizedBox(height: 12),
               _BadgeCard(
@@ -125,7 +125,7 @@ class HowWeVerifyScreen extends StatelessWidget {
                   Row(children: [
                     const Icon(Icons.flag_outlined, color: AppColors.error, size: 20),
                     const SizedBox(width: 8),
-                    Text('Report a Fake Agent', style: GoogleFonts.syne(
+                    Text('Report a Fake Agent', style: GoogleFonts.plusJakartaSans(
                         fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.text)),
                   ]),
                   const SizedBox(height: 8),

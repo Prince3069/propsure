@@ -407,7 +407,7 @@ class _MapPreviewCard extends StatelessWidget {
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(_fmtPrice(listing.price),
-                  style: GoogleFonts.syne(
+                  style: GoogleFonts.plusJakartaSans(
                       fontSize: 17,
                       fontWeight: FontWeight.w800,
                       color: AppColors.primary)),

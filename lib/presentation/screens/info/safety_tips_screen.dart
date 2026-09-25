@@ -31,7 +31,7 @@ class SafetyTipsScreen extends StatelessWidget {
                   children: [
                     const Icon(Icons.shield_rounded, color: Colors.white, size: 38),
                     const SizedBox(height: 10),
-                    Text('Safety Tips', style: GoogleFonts.syne(
+                    Text('Safety Tips', style: GoogleFonts.plusJakartaSans(
                         fontSize: 26, fontWeight: FontWeight.w800, color: Colors.white)),
                     const Text('Stay safe while renting in Abuja',
                         style: TextStyle(color: Colors.white70, fontSize: 13)),
@@ -118,7 +118,7 @@ class SafetyTipsScreen extends StatelessWidget {
                 ),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text('Seen something suspicious?',
-                      style: GoogleFonts.syne(
+                      style: GoogleFonts.plusJakartaSans(
                           fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white)),
                   const SizedBox(height: 6),
                   const Text('Report any suspicious listing or agent directly from the listing page by tapping the flag icon. We review all reports within 24 hours.',
@@ -150,7 +150,7 @@ class SafetyTipsScreen extends StatelessWidget {
           child: Icon(icon, size: 17, color: color),
         ),
         const SizedBox(width: 10),
-        Text(title, style: GoogleFonts.syne(
+        Text(title, style: GoogleFonts.plusJakartaSans(
             fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.text)),
       ]),
       const SizedBox(height: 10),

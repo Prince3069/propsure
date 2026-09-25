@@ -254,8 +254,26 @@ class _AgentListingsScreenState extends ConsumerState<AgentListingsScreen> {
             ),
           ]);
         },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        // Was a bare spinner — now a shaped skeleton list matching the
+        // eventual row layout, same fix applied to Chat/Notifications
+        // already had, extended here for consistency.
+        loading: () => ListView.separated(
+          padding: const EdgeInsets.all(14),
+          itemCount: 5,
+          separatorBuilder: (_, __) => const SizedBox(height: 10),
+          itemBuilder: (_, __) => const SkeletonListTile(),
+        ),
+        // Friendly failure state instead of the raw exception — this one
+        // was missed in the earlier pass because it used the "Error: $e"
+        // phrasing rather than the bare "$e" pattern I was grepping for
+        // at the time; caught now on a full project-wide re-sweep.
+        error: (e, _) => const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text('Couldn\'t load your listings right now.',
+                style: TextStyle(fontSize: 13, color: AppColors.text3)),
+          ),
+        ),
       ),
     );
   }

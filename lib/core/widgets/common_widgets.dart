@@ -32,7 +32,7 @@ class PropsureLogo extends StatelessWidget {
         if (showText) ...[
           SizedBox(width: size * 0.28),
           Text('Propsure',
-              style: GoogleFonts.syne(
+              style: GoogleFonts.plusJakartaSans(
                 fontSize: size * 0.6,
                 fontWeight: FontWeight.w800,
                 color: textColor,
@@ -228,12 +228,26 @@ class _CardImage extends StatelessWidget {
                   shape: BoxShape.circle,
                   boxShadow: AppShadows.sm,
                 ),
-                child: Icon(
-                  isSaved
-                      ? Icons.bookmark_rounded
-                      : Icons.bookmark_border_rounded,
-                  size: 16,
-                  color: isSaved ? AppColors.primary : AppColors.text3,
+                child: AnimatedSwitcher(
+                  // FIX: this was already commented "Save button with
+                  // animation" but the AnimatedContainer around it only
+                  // animates container properties that never actually
+                  // change — the icon itself swapped instantly with no
+                  // transition. AnimatedSwitcher gives it the scale+fade
+                  // pop the comment always claimed it had.
+                  duration: const Duration(milliseconds: 220),
+                  transitionBuilder: (child, animation) => ScaleTransition(
+                    scale: animation,
+                    child: FadeTransition(opacity: animation, child: child),
+                  ),
+                  child: Icon(
+                    isSaved
+                        ? Icons.bookmark_rounded
+                        : Icons.bookmark_border_rounded,
+                    key: ValueKey(isSaved),
+                    size: 16,
+                    color: isSaved ? AppColors.primary : AppColors.text3,
+                  ),
                 ),
               ),
             ),
@@ -260,7 +274,7 @@ class _CardBody extends StatelessWidget {
             children: [
               Text(
                 _fmtPrice(listing.price),
-                style: GoogleFonts.syne(
+                style: GoogleFonts.plusJakartaSans(
                   fontSize: compact ? 15 : 17,
                   fontWeight: FontWeight.w800,
                   color: AppColors.primary,
@@ -546,7 +560,7 @@ class SectionHeader extends StatelessWidget {
               ),
               child: Text(
                 'See All',
-                style: GoogleFonts.outfit(
+                style: GoogleFonts.plusJakartaSans(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                   color: AppColors.primary,
@@ -639,13 +653,62 @@ class EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: const BoxDecoration(
-                color: AppColors.primaryPale,
-                shape: BoxShape.circle,
+            // Upgraded from a bare icon-in-a-circle to a small layered
+            // composition (two soft background circles + the icon) —
+            // not a bespoke illustration asset (that's a much bigger,
+            // per-empty-state art task), but every screen using
+            // EmptyState picks this up automatically, which a real
+            // illustration per screen wouldn't without individual work.
+            SizedBox(
+              width: 120,
+              height: 120,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Container(
+                    width: 120,
+                    height: 120,
+                    decoration: const BoxDecoration(
+                      color: AppColors.primaryPale,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  Positioned(
+                    top: 6,
+                    right: 10,
+                    child: Container(
+                      width: 26,
+                      height: 26,
+                      decoration: BoxDecoration(
+                        color: AppColors.goldLight,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: AppColors.surface, width: 3),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 12,
+                    left: 8,
+                    child: Container(
+                      width: 16,
+                      height: 16,
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryPale2,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: AppColors.surface, width: 2),
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: const BoxDecoration(
+                      color: AppColors.card,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(icon, size: 36, color: AppColors.primary),
+                  ),
+                ],
               ),
-              child: Icon(icon, size: 44, color: AppColors.text3),
             ),
             const SizedBox(height: 20),
             Text(
@@ -749,6 +812,81 @@ class _SkeletonCardState extends State<SkeletonCard>
                         color: c,
                         borderRadius: BorderRadius.circular(4),
                       ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ─── SKELETON LIST TILE (Chat / Notifications / My Listings rows) ─────────
+// Same shimmer technique as SkeletonCard above, shaped as a row instead of
+// a card — for list-based loading states that previously just showed a
+// bare CircularProgressIndicator with no sense of what's about to load.
+class SkeletonListTile extends StatefulWidget {
+  const SkeletonListTile({super.key});
+  @override
+  State<SkeletonListTile> createState() => _SkeletonListTileState();
+}
+
+class _SkeletonListTileState extends State<SkeletonListTile>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      duration: const Duration(milliseconds: 1100),
+      vsync: this,
+    )..repeat(reverse: true);
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (_, __) {
+        final c = Color.lerp(AppColors.bg, AppColors.border, _anim.value)!;
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      height: 12,
+                      width: 140,
+                      decoration:
+                          BoxDecoration(color: c, borderRadius: BorderRadius.circular(4)),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      height: 10,
+                      width: 200,
+                      decoration:
+                          BoxDecoration(color: c, borderRadius: BorderRadius.circular(4)),
                     ),
                   ],
                 ),
