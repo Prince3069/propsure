@@ -1,465 +1,134 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:url_launcher/url_launcher.dart';
-import '../../../core/constants/app_theme.dart';
 import '../../../core/constants/app_constants.dart';
-import '../../providers/app_providers.dart';
+import '../../../core/constants/app_theme.dart';
+import '../../../core/utils/booking_labels.dart';
+import '../../../core/widgets/common_widgets.dart';
 import '../../../data/repositories/booking_repository.dart';
+import '../../providers/actions.dart';
+import '../../providers/app_providers.dart';
 
-class BookingDetailScreen extends ConsumerStatefulWidget {
+/// Inspection detail: when, where, who, and the next action. Rescheduling is
+/// intentionally not offered until agents can fulfil it; cancel and re-request.
+class BookingDetailScreen extends ConsumerWidget {
   final String bookingId;
   const BookingDetailScreen({super.key, required this.bookingId});
-  @override
-  ConsumerState<BookingDetailScreen> createState() =>
-      _BookingDetailScreenState();
-}
-
-class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
-  bool _loading = false;
-
-  Future<void> _updateStatus(String action) async {
-    setState(() => _loading = true);
-    final repo = ref.read(bookingRepositoryProvider);
-    final actorId = ref.read(currentUserIdProvider);
-    if (actorId == null) {
-      setState(() => _loading = false);
-      return;
-    }
-    switch (action) {
-      case 'confirm':
-        await repo.confirmBooking(widget.bookingId, actorId: actorId);
-        break;
-      case 'reject':
-        await _rejectWithReason();
-        return;
-      case 'cancel':
-        await repo.cancelBooking(widget.bookingId, actorId: actorId);
-        break;
-      case 'complete':
-        await repo.completeBooking(widget.bookingId, actorId: actorId);
-        break;
-    }
-    setState(() => _loading = false);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Booking $action successfully!')));
-      context.pop();
-    }
-  }
-
-  Future<void> _rejectWithReason() async {
-    final actorId = ref.read(currentUserIdProvider);
-    if (actorId == null) {
-      setState(() => _loading = false);
-      return;
-    }
-    final ctrl = TextEditingController();
-    final reason = await showDialog<String>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Reason for rejection'),
-        content: TextField(
-            controller: ctrl,
-            maxLines: 3,
-            decoration: const InputDecoration(hintText: 'Optional reason…')),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, ctrl.text.trim()),
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
-            child: const Text('Reject'),
-          ),
-        ],
-      ),
-    );
-    if (reason != null) {
-      await ref
-          .read(bookingRepositoryProvider)
-          .rejectBooking(widget.bookingId, actorId: actorId, reason: reason);
-      setState(() => _loading = false);
-      if (mounted) {
-        context.pop();
-      }
-    } else {
-      setState(() => _loading = false);
-    }
-  }
 
   @override
-  Widget build(BuildContext context) {
-    final user = ref.watch(currentUserModelProvider).value;
-    final isAgent = user?.role == AppConstants.roleAgent ||
-        user?.role == AppConstants.roleLandlord;
-
+  Widget build(BuildContext context, WidgetRef ref) {
+    final uid = ref.watch(currentUserIdProvider);
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Booking Details',
-            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
-      ),
+      backgroundColor: AppColors.surface,
+      appBar: const PsTopBar(title: 'Inspection details'),
       body: FutureBuilder<BookingModel?>(
-        future: ref
-            .read(bookingRepositoryProvider)
-            .getBookingById(widget.bookingId),
+        future: ref.read(bookingRepositoryProvider).getBookingById(bookingId),
         builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final booking = snap.data;
-          if (booking == null) {
-            return const Center(child: Text('Booking not found'));
-          }
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 560),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Status banner
-                    _StatusBanner(status: booking.status),
-                    const SizedBox(height: 16),
-
-                    // Listing info
-                    _InfoCard(children: [
-                      _InfoRow('Property', booking.listingTitle),
-                      _InfoRow('Booking ID',
-                          '#${booking.id.substring(0, 8).toUpperCase()}'),
-                    ]),
-                    const SizedBox(height: 12),
-
-                    // Date & time
-                    _InfoCard(title: '📅 Inspection Details', children: [
-                      _InfoRow('Date', _formatDate(booking.dateTime)),
-                      _InfoRow('Time', _formatTime(booking.dateTime)),
-                      if (booking.message != null &&
-                          booking.message!.isNotEmpty)
-                        _InfoRow('Message', booking.message!),
-                    ]),
-                    const SizedBox(height: 12),
-
-                    // Tenant info
-                    _InfoCard(
-                        title: isAgent ? '👤 Tenant' : '🏡 Agent',
-                        children: [
-                          _InfoRow('Name',
-                              isAgent ? booking.userName : booking.agentName),
-                          _InfoRow('Phone',
-                              isAgent ? booking.userPhone : booking.agentPhone),
-                        ]),
-                    const SizedBox(height: 12),
-
-                    // Rejection reason
-                    if (booking.rejectionReason != null &&
-                        booking.rejectionReason!.isNotEmpty) ...[
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: AppColors.error.withValues(alpha: 0.07),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                              color: AppColors.error.withValues(alpha: 0.2)),
-                        ),
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('Rejection Reason',
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      color: AppColors.error,
-                                      fontSize: 12)),
-                              const SizedBox(height: 4),
-                              Text(booking.rejectionReason!,
-                                  style: const TextStyle(
-                                      fontSize: 13, color: AppColors.text2)),
-                            ]),
-                      ),
-                      const SizedBox(height: 12),
-                    ],
-
-                    // Actions
-                    _ActionButtons(
-                      booking: booking,
-                      isAgent: isAgent,
-                      loading: _loading,
-                      onAction: _updateStatus,
-                      onCall: () async {
-                        final phone =
-                            isAgent ? booking.userPhone : booking.agentPhone;
-                        final uri = Uri(scheme: 'tel', path: phone);
-                        if (await canLaunchUrl(uri)) launchUrl(uri);
-                      },
-                      onChat: () => context.push('/messages'),
-                      onViewListing: () =>
-                          context.push('/listing/${booking.listingId}'),
-                    ),
-                  ]),
-            ),
-          );
+          if (snap.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
+          final b = snap.data;
+          if (b == null) return const PsEmpty(icon: Icons.event_busy_outlined, title: 'Inspection not found', message: 'It may have been removed.');
+          return _Body(b: b, uid: uid);
         },
       ),
     );
   }
-
-  String _formatDate(DateTime dt) {
-    final days = [
-      'Monday',
-      'Tuesday',
-      'Wednesday',
-      'Thursday',
-      'Friday',
-      'Saturday',
-      'Sunday'
-    ];
-    final months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec'
-    ];
-    return '${days[dt.weekday - 1]}, ${dt.day} ${months[dt.month - 1]} ${dt.year}';
-  }
-
-  String _formatTime(DateTime dt) {
-    final h = dt.hour > 12
-        ? dt.hour - 12
-        : dt.hour == 0
-            ? 12
-            : dt.hour;
-    final m = dt.minute.toString().padLeft(2, '0');
-    final period = dt.hour >= 12 ? 'PM' : 'AM';
-    return '$h:$m $period';
-  }
 }
 
-class _StatusBanner extends StatelessWidget {
-  final String status;
-  const _StatusBanner({required this.status});
+class _Body extends ConsumerStatefulWidget {
+  final BookingModel b;
+  final String? uid;
+  const _Body({required this.b, required this.uid});
+  @override
+  ConsumerState<_Body> createState() => _BodyState();
+}
+
+class _BodyState extends ConsumerState<_Body> {
+  late String _status = widget.b.status;
+
+  Future<void> _do(Future<void> Function() f, String newStatus, String done) async {
+    final ok = await runAction(context, f, success: done);
+    if (ok && mounted) setState(() => _status = newStatus);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final configs = {
-      'pending': (
-        AppColors.statusPending,
-        const Color(0xFFFEF3C7),
-        '⏳',
-        'Awaiting Confirmation'
-      ),
-      'confirmed': (
-        AppColors.success,
-        const Color(0xFFDCFCE7),
-        '✅',
-        'Inspection Confirmed'
-      ),
-      'completed': (
-        AppColors.text2,
-        AppColors.bg,
-        '🏁',
-        'Inspection Completed'
-      ),
-      'cancelled': (
-        AppColors.error,
-        const Color(0xFFFEE2E2),
-        '❌',
-        'Booking Cancelled'
-      ),
-      'rejected': (
-        AppColors.error,
-        const Color(0xFFFEE2E2),
-        '🚫',
-        'Booking Rejected'
-      ),
-    };
-    final (fg, bg, icon, label) =
-        configs[status] ?? (AppColors.text3, AppColors.bg, '❓', 'Unknown');
+    final b = widget.b;
+    final uid = widget.uid ?? '';
+    final isAgent = uid == b.agentId;
+    final repo = ref.read(bookingRepositoryProvider);
+    final active = _status == AppConstants.bookingPending || _status == AppConstants.bookingConfirmed;
+    final tone = _status == AppConstants.bookingConfirmed ? PsTone.success : _status == AppConstants.bookingPending ? PsTone.warning : PsTone.neutral;
 
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: fg.withValues(alpha: 0.2))),
-      child: Row(children: [
-        Text(icon, style: const TextStyle(fontSize: 20)),
-        const SizedBox(width: 10),
-        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Status',
-              style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  color: fg.withValues(alpha: 0.7),
-                  letterSpacing: 0.5)),
-          Text(label,
-              style: TextStyle(
-                  fontSize: 14, fontWeight: FontWeight.w800, color: fg)),
+    return ListView(padding: const EdgeInsets.fromLTRB(AppSpace.gutter, 0, AppSpace.gutter, 24), children: [
+      PsCard(
+        color: AppColors.primaryPale,
+        borderColor: AppColors.primaryPale2,
+        child: Row(children: [
+          const Icon(Icons.event_outlined, size: 32, color: AppColors.primary),
+          const SizedBox(width: 14),
+          Expanded(child: Text(formatVisit(b.dateTime), style: AppText.h3)),
+          PsPill(bookingStatusLabel(_status), tone: tone),
         ]),
-      ]),
-    );
-  }
-}
-
-class _InfoCard extends StatelessWidget {
-  final String? title;
-  final List<Widget> children;
-  const _InfoCard({this.title, required this.children});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.border)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        if (title != null) ...[
-          Text(title!,
-              style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                  color: AppColors.text)),
-          const Divider(height: 16),
-        ],
-        ...children,
-      ]),
-    );
-  }
-}
-
-class _InfoRow extends StatelessWidget {
-  final String label, value;
-  const _InfoRow(this.label, this.value);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        SizedBox(
-            width: 100,
-            child: Text(label,
-                style: const TextStyle(
-                    fontSize: 12,
-                    color: AppColors.text3,
-                    fontWeight: FontWeight.w500))),
-        Expanded(
-            child: Text(value,
-                style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.text))),
-      ]),
-    );
-  }
-}
-
-class _ActionButtons extends StatelessWidget {
-  final dynamic booking;
-  final bool isAgent, loading;
-  final ValueChanged<String> onAction;
-  final VoidCallback onCall, onChat, onViewListing;
-  const _ActionButtons(
-      {required this.booking,
-      required this.isAgent,
-      required this.loading,
-      required this.onAction,
-      required this.onCall,
-      required this.onChat,
-      required this.onViewListing});
-
-  @override
-  Widget build(BuildContext context) {
-    final status = booking.status as String;
-
-    return Column(children: [
-      // View Listing & Contact row
-      Row(children: [
-        Expanded(
-            child: OutlinedButton.icon(
-          onPressed: onViewListing,
-          icon: const Icon(Icons.home_outlined, size: 16),
-          label: const Text('View Property'),
-          style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 12)),
-        )),
-        const SizedBox(width: 8),
-        Expanded(
-            child: OutlinedButton.icon(
-          onPressed: onCall,
-          icon: const Icon(Icons.call_rounded, size: 16),
-          label: Text(isAgent ? 'Call Tenant' : 'Call Agent'),
-          style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 12)),
-        )),
-      ]),
-      const SizedBox(height: 10),
-
-      // Status-based actions
-      if (isAgent && status == AppConstants.bookingPending) ...[
-        Row(children: [
-          Expanded(
-              child: OutlinedButton(
-            onPressed: loading ? null : () => onAction('reject'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.error,
-              side: const BorderSide(color: AppColors.error),
-              padding: const EdgeInsets.symmetric(vertical: 13),
-            ),
-            child: const Text('Reject',
-                style: TextStyle(fontWeight: FontWeight.w700)),
-          )),
-          const SizedBox(width: 10),
-          Expanded(
-              child: ElevatedButton(
-            onPressed: loading ? null : () => onAction('confirm'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.success,
-              padding: const EdgeInsets.symmetric(vertical: 13),
-            ),
-            child: loading
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white))
-                : Text('Confirm',
-                    style: GoogleFonts.plusJakartaSans(
-                        fontWeight: FontWeight.w800, color: Colors.white)),
-          )),
+      ),
+      const SizedBox(height: 12),
+      PsCard(
+        padding: const EdgeInsets.all(12),
+        onTap: () => context.push('/listing/${b.listingId}'),
+        semanticLabel: b.listingTitle,
+        child: Row(children: [
+          SizedBox(width: 110, height: 96, child: PsNetImage(b.listingThumbnail, radius: BorderRadius.circular(12))),
+          const SizedBox(width: 14),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(b.listingTitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title),
+            const SizedBox(height: 6),
+            Text('View home', style: AppText.label.copyWith(color: AppColors.primary, decoration: TextDecoration.underline)),
+          ])),
+          const Icon(Icons.chevron_right_rounded),
         ]),
-      ] else if (isAgent && status == AppConstants.bookingConfirmed) ...[
-        SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: loading ? null : () => onAction('complete'),
-              child: const Text('Mark as Completed'),
-            )),
-      ] else if (!isAgent &&
-          (status == AppConstants.bookingPending ||
-              status == AppConstants.bookingConfirmed)) ...[
-        SizedBox(
-            width: double.infinity,
-            child: OutlinedButton(
-              onPressed: loading ? null : () => onAction('cancel'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.error,
-                side: const BorderSide(color: AppColors.error),
-                minimumSize: const Size(double.infinity, 48),
-              ),
-              child: const Text('Cancel Booking',
-                  style: TextStyle(fontWeight: FontWeight.w700)),
-            )),
+      ),
+      const SizedBox(height: 12),
+      PsRowGroup([
+        const PsListRow(icon: Icons.location_on_outlined, title: 'Meeting point', subtitle: 'Agree the exact meeting point in the conversation before you go.', chevron: false),
+        PsListRow(
+          leading: PsAvatar(url: isAgent ? b.userPhoto : b.agentPhoto, name: isAgent ? b.userName : b.agentName, size: 48),
+          title: isAgent ? b.userName : b.agentName,
+          subtitle: isAgent ? 'Renter' : 'Property agent',
+          trailing: PsButton('Message', expand: false, kind: PsButtonKind.outline, icon: Icons.chat_bubble_outline_rounded, onPressed: () async {
+            final l = await ref.read(listingRepositoryProvider).getById(b.listingId);
+            if (l != null && context.mounted) await openChatAbout(context, ref, l);
+          }),
+          chevron: false,
+        ),
+      ]),
+      const SizedBox(height: 12),
+      PsCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [const PsIconCircle(Icons.checklist_rounded), const SizedBox(width: 12), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('What to check', style: AppText.title), Text('A quick guide for a smooth inspection.', style: AppText.small)]))]),
+        const SizedBox(height: 8),
+        for (final t in const [('Water and power', Icons.water_drop_outlined), ('Room condition', Icons.home_outlined), ('All fees in writing', Icons.description_outlined)])
+          Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Row(children: [Icon(t.$2, size: 20), const SizedBox(width: 12), Text(t.$1, style: AppText.body)])),
+      ])),
+      if (b.message != null && b.message!.isNotEmpty) ...[const SizedBox(height: 12), PsNote('Message: ${b.message}')],
+      const SizedBox(height: 16),
+      if (isAgent && _status == AppConstants.bookingPending) ...[
+        PsButton('Confirm inspection', onPressed: () => _do(() => repo.confirmBooking(b.id, actorId: uid), AppConstants.bookingConfirmed, 'Inspection confirmed.')),
+        const SizedBox(height: 10),
+        PsButton('Decline', kind: PsButtonKind.outline, onPressed: () => _do(() => repo.rejectBooking(b.id, actorId: uid, reason: 'Not available at that time'), AppConstants.bookingRejected, 'Inspection declined.')),
+      ] else if (isAgent && _status == AppConstants.bookingConfirmed && b.dateTime.isBefore(DateTime.now())) ...[
+        PsButton('Mark as completed', onPressed: () => _do(() => repo.completeBooking(b.id, actorId: uid), AppConstants.bookingCompleted, 'Marked as completed.')),
+      ],
+      if (!isAgent && active) ...[
+        PsButton('Share visit details', icon: Icons.share_outlined, onPressed: () async {
+          await Clipboard.setData(ClipboardData(text: 'I am visiting ${b.listingTitle} on ${formatVisit(b.dateTime)} with ${b.agentName}.'));
+          if (context.mounted) showPsSnack(context, 'Visit details copied. Send them to someone you trust.');
+        }),
+      ],
+      if (active) ...[
+        const SizedBox(height: 10),
+        PsButton('Cancel inspection', kind: PsButtonKind.danger, icon: Icons.close_rounded, onPressed: () async {
+          final sure = await showDialog<bool>(context: context, builder: (c) => AlertDialog(title: const Text('Cancel this inspection?'), content: const Text('The other person will be told.'), actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Keep it')), TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Cancel inspection'))]));
+          if (sure == true) await _do(() => repo.cancelBooking(b.id, actorId: uid), AppConstants.bookingCancelled, 'Inspection cancelled.');
+        }),
       ],
     ]);
   }

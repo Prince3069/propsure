@@ -1,150 +1,112 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:timeago/timeago.dart' as timeago;
-import '../../../core/constants/app_theme.dart';
 import '../../../core/constants/app_constants.dart';
+import '../../../core/constants/app_theme.dart';
+import '../../../core/utils/booking_labels.dart';
 import '../../../core/widgets/common_widgets.dart';
-import '../../providers/app_providers.dart';
 import '../../../data/repositories/booking_repository.dart';
+import '../../providers/app_providers.dart';
 
-class BookingsScreen extends ConsumerWidget {
+/// Inspections. A requested appointment is visibly different from a
+/// confirmed one; date, time, property and next action come first.
+class BookingsScreen extends ConsumerStatefulWidget {
   const BookingsScreen({super.key});
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final userId = ref.watch(currentUserIdProvider) ?? '';
-    final user = ref.watch(currentUserModelProvider).value;
-    final isAgent = user?.role == AppConstants.roleAgent || user?.role == AppConstants.roleLandlord;
-    return DefaultTabController(
-      length: isAgent ? 2 : 1,
-      child: Scaffold(
-        backgroundColor: AppColors.bg,
-        appBar: AppBar(
-          title: Text('My bookings', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800)),
-          bottom: isAgent
-              ? const TabBar(
-                  padding: EdgeInsets.symmetric(horizontal: 12),
-                  tabs: [Tab(text: 'My Requests'), Tab(text: 'Incoming')],
-                  indicatorColor: AppColors.primary,
-                  labelColor: AppColors.primary,
-                  unselectedLabelColor: AppColors.text3,
-                )
-              : null,
-        ),
-        body: isAgent
-            ? TabBarView(children: [
-                _BookingList(userId: userId, isAgentView: false),
-                _BookingList(userId: userId, isAgentView: true),
-              ])
-            : _BookingList(userId: userId, isAgentView: false),
-      ),
-    );
-  }
+  ConsumerState<BookingsScreen> createState() => _State();
 }
 
-class _BookingList extends ConsumerWidget {
-  final String userId;
-  final bool isAgentView;
-  const _BookingList({required this.userId, required this.isAgentView});
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final stream = isAgentView ? ref.watch(agentBookingsProvider(userId)) : ref.watch(userBookingsProvider(userId));
-    return stream.when(
-      data: (bookings) {
-        final typed = bookings.cast<BookingModel>();
-        if (typed.isEmpty) {
-          return EmptyState(
-            icon: Icons.calendar_today_outlined,
-            title: isAgentView ? 'No incoming requests' : 'No bookings yet',
-            subtitle: isAgentView ? 'Inspection requests from tenants will show here.' : 'Book an inspection from any property listing.',
-            action: isAgentView
-                ? null
-                : TextButton(onPressed: () => context.push('/search'), child: const Text('Browse Properties')),
-          );
-        }
-        return ListView.separated(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 24),
-          itemCount: typed.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 10),
-          itemBuilder: (ctx, i) => _BookingCard(booking: typed[i], isAgentView: isAgentView),
-        );
-      },
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('Error: $e')),
-    );
-  }
-}
+class _State extends ConsumerState<BookingsScreen> {
+  int _tab = 0;
 
-class _BookingCard extends StatelessWidget {
-  final BookingModel booking;
-  final bool isAgentView;
-  const _BookingCard({required this.booking, required this.isAgentView});
   @override
   Widget build(BuildContext context) {
-    final configs = {
-      'pending': (AppColors.statusPending, const Color(0xFFFEF3C7), Icons.schedule_rounded),
-      'confirmed': (AppColors.success, const Color(0xFFDCFCE7), Icons.check_circle_outline_rounded),
-      'completed': (AppColors.text2, AppColors.bg, Icons.flag_outlined),
-      'cancelled': (AppColors.error, const Color(0xFFFEE2E2), Icons.cancel_outlined),
-      'rejected': (AppColors.error, const Color(0xFFFEE2E2), Icons.block_outlined),
-    };
-    final (fg, bg, icon) = configs[booking.status] ?? (AppColors.text3, AppColors.bg, Icons.help_outline_rounded);
-    final dt = booking.dateTime;
-    final months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    final h = dt.hour > 12 ? dt.hour - 12 : dt.hour;
-    final m = dt.minute.toString().padLeft(2, '0');
-    final dateStr = '${dt.day} ${months[dt.month - 1]} · $h:$m ${dt.hour >= 12 ? 'PM' : 'AM'}';
-    return GestureDetector(
-      onTap: () => context.push('/booking/${booking.id}'),
-      child: Container(
-        padding: const EdgeInsets.all(15),
-        decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(17),
-            border: Border.all(color: AppColors.border),
-            boxShadow: AppShadows.sm),
+    final uid = ref.watch(currentUserIdProvider);
+    final isAgent = ref.watch(isAgentProvider);
+    final async = uid == null ? null : (isAgent ? ref.watch(agentBookingsProvider(uid)) : ref.watch(userBookingsProvider(uid)));
+    final cutoff = DateTime.now().subtract(const Duration(hours: 3));
+
+    return Scaffold(
+      backgroundColor: AppColors.surface,
+      body: ListView(padding: EdgeInsets.zero, children: [
+        PsGreenHeader(
+          padding: const EdgeInsets.fromLTRB(12, 0, 24, 28),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const PsTopBar(dark: true),
+            const Padding(padding: EdgeInsets.only(left: 12), child: PropsureLogo(light: true, size: 30)),
+          ]),
+        ),
+        Padding(
+          padding: kPagePadding,
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const SizedBox(height: 20),
+            Text('Inspections', style: AppText.display),
+            Text('Your scheduled property viewings.', style: AppText.bodyMuted),
+            const SizedBox(height: 16),
+            PsSegmented(labels: const ['Upcoming', 'Past'], index: _tab, onChanged: (i) => setState(() => _tab = i)),
+            const SizedBox(height: 16),
+            if (async == null)
+              const PsEmpty(icon: Icons.lock_outline_rounded, title: 'Sign in to see inspections', message: 'Requests you make appear here.')
+            else
+              async.when(
+                loading: () => const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator())),
+                error: (_, __) => PsError(onRetry: () => ref.invalidate(userBookingsProvider(uid!))),
+                data: (all) {
+                  final upcoming = all.where((b) => (b.status == AppConstants.bookingPending || b.status == AppConstants.bookingConfirmed) && b.dateTime.isAfter(cutoff)).toList()
+                    ..sort((a, b) => a.dateTime.compareTo(b.dateTime));
+                  final past = all.where((b) => !upcoming.contains(b)).toList()..sort((a, b) => b.dateTime.compareTo(a.dateTime));
+                  final list = _tab == 0 ? upcoming : past;
+                  if (list.isEmpty) {
+                    return PsEmpty(icon: Icons.event_outlined, title: _tab == 0 ? 'No upcoming inspections' : 'No past inspections', message: 'Request an inspection from a home or from a conversation.', actionLabel: 'Find a home', onAction: () => context.go('/home'));
+                  }
+                  return Column(children: [for (final b in list) _Tile(b: b, isAgent: isAgent)]);
+                },
+              ),
+            const SizedBox(height: 12),
+            PsCard(color: AppColors.primaryPale, borderColor: AppColors.primaryPale2, child: Row(children: [
+              const Icon(Icons.shield_outlined, color: AppColors.primary),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Before you go', style: AppText.title), Text('Confirm the meeting point and let someone know.', style: AppText.small)])),
+            ])),
+            const SizedBox(height: 16),
+            if (!isAgent) PsButton('Find another home', icon: Icons.add_rounded, onPressed: () => context.go('/home')),
+            const SizedBox(height: 24),
+          ]),
+        ),
+      ]),
+    );
+  }
+}
+
+class _Tile extends StatelessWidget {
+  final BookingModel b;
+  final bool isAgent;
+  const _Tile({required this.b, required this.isAgent});
+
+  @override
+  Widget build(BuildContext context) {
+    final confirmed = b.status == AppConstants.bookingConfirmed;
+    final pending = b.status == AppConstants.bookingPending;
+    final tone = confirmed ? PsTone.success : pending ? PsTone.warning : PsTone.neutral;
+    final label = pending ? (isAgent ? 'Needs your confirmation' : 'Awaiting agent confirmation') : bookingStatusLabel(b.status);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: PsCard(
+        onTap: () => context.push('/booking/${b.id}'),
+        semanticLabel: '${b.listingTitle}, $label, ${formatVisit(b.dateTime)}',
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(color: AppColors.primaryPale, borderRadius: BorderRadius.circular(12)),
-                child: const Icon(Icons.home_work_outlined, color: AppColors.primary, size: 19)),
-            const SizedBox(width: 10),
-            Expanded(child: Text(booking.listingTitle, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14), maxLines: 1, overflow: TextOverflow.ellipsis)),
-            const SizedBox(width: 8),
-            Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(99)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(icon, size: 12, color: fg),
-                  const SizedBox(width: 4),
-                  Text(booking.status.toUpperCase(), style: TextStyle(color: fg, fontSize: 8, fontWeight: FontWeight.w800, letterSpacing: .3)),
-                ])),
-          ]),
-          const SizedBox(height: 13),
-          Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-              decoration: BoxDecoration(color: AppColors.bg, borderRadius: BorderRadius.circular(11)),
-              child: Row(children: [
-                const Icon(Icons.calendar_today_outlined, size: 14, color: AppColors.primary),
-                const SizedBox(width: 7),
-                Expanded(child: Text(dateStr, style: const TextStyle(fontSize: 12, color: AppColors.text2, fontWeight: FontWeight.w600))),
-              ])),
-          const SizedBox(height: 9),
-          Row(children: [
-            const Icon(Icons.person_outline_rounded, size: 14, color: AppColors.text3),
-            const SizedBox(width: 5),
-            Expanded(child: Text(isAgentView ? booking.userName : booking.agentName, style: const TextStyle(fontSize: 12, color: AppColors.text2), maxLines: 1, overflow: TextOverflow.ellipsis)),
-            Text(timeago.format(booking.createdAt), style: const TextStyle(fontSize: 10, color: AppColors.text3)),
-          ]),
-          if (booking.message != null && booking.message!.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(booking.message!, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: AppColors.text3, fontStyle: FontStyle.italic)),
-          ],
+          Row(children: [PsPill(label, tone: tone, small: true), const Spacer(), const Icon(Icons.chevron_right_rounded)]),
+          const SizedBox(height: 8),
+          Text(formatVisit(b.dateTime), style: AppText.h3),
           const SizedBox(height: 10),
-          const Align(alignment: Alignment.centerRight, child: Text('View details →', style: TextStyle(fontSize: 11, color: AppColors.primary, fontWeight: FontWeight.w800))),
+          Row(children: [
+            SizedBox(width: 84, height: 84, child: PsNetImage(b.listingThumbnail, radius: BorderRadius.circular(12))),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(b.listingTitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title),
+              Text(isAgent ? 'With ${b.userName}' : 'With ${b.agentName}', style: AppText.small),
+            ])),
+          ]),
         ]),
       ),
     );

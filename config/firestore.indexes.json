@@ -1,0 +1,39 @@
+{
+  "indexes": [
+    { "collectionGroup": "listings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "listings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "category", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "listings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "area", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "listings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "availabilityConfirmedAt", "order": "ASCENDING" } ] },
+    { "collectionGroup": "listings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "publishedAt", "order": "ASCENDING" } ] },
+    { "collectionGroup": "listings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "agentId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "bookings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "bookings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "agentId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "enquiries", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "agentId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "chats", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "participantIds", "arrayConfig": "CONTAINS" }, { "fieldPath": "updatedAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "saved_searches", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "notifications", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "support_requests", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "verification_requests", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "applicantId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "shortlists", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "memberIds", "arrayConfig": "CONTAINS" }, { "fieldPath": "updatedAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "media_jobs", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "processedAt", "order": "ASCENDING" } ] },
+    { "collectionGroup": "transactions", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "ASCENDING" } ] }
+  ],
+  "fieldOverrides": []
+}

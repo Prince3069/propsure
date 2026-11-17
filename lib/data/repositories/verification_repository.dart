@@ -33,6 +33,17 @@ class VerificationRepository {
             : VerificationRequestModel.fromFirestore(snap.docs.first));
   }
 
+  /// Every request the applicant has made (newest first) so each check
+  /// (identity, each listing's authority) can show its own status.
+  Stream<List<VerificationRequestModel>> watchAllForUser(String uid) {
+    return _col
+        .where('applicantId', isEqualTo: uid)
+        .orderBy('createdAt', descending: true)
+        .limit(30)
+        .snapshots()
+        .map((s) => s.docs.map(VerificationRequestModel.fromFirestore).toList());
+  }
+
   Future<String> _uploadPrivate(
       File file, String uid, String requestId, String filename) async {
     if (!await file.exists()) {
@@ -40,7 +51,15 @@ class VerificationRepository {
     }
     final path = 'verification/$uid/$requestId/$filename';
     final ref = _storage.ref(path);
-    await ref.putFile(file);
+    final lower = filename.toLowerCase();
+    final mime = lower.endsWith('.mp4')
+        ? 'video/mp4'
+        : lower.endsWith('.mov')
+            ? 'video/quicktime'
+            : lower.endsWith('.png')
+                ? 'image/png'
+                : 'image/jpeg';
+    await ref.putFile(file, SettableMetadata(contentType: mime));
     // Return the STORAGE PATH, not getDownloadURL() — this collection must
     // never contain a public URL. Reviewers fetch a signed URL server-side.
     return path;
@@ -100,15 +119,9 @@ class VerificationRepository {
 
     await docRef.set(model.toClientSubmitMap());
 
-    // Also flip the user's own status to "pending" so the profile/drawer
-    // reflect it immediately — this is still just a status flag, not an
-    // approval; firestore.rules only allows a user to set THEIR OWN status
-    // to 'pending', never 'approved'.
-    await _db.collection(AppConstants.colUsers).doc(uid).update({
-      'verificationStatus': 'pending',
-      'verificationType': requestType,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    // The applicant's status is read from this request document (see
+    // myVerificationRequestProvider). The private users document is never
+    // written for verification: its trust fields are server-owned.
 
     return requestId;
   }

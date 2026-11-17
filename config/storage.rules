@@ -1,0 +1,70 @@
+rules_version = '2';
+// Propsure Storage rules.
+//  - Public listing media is world-readable but writable only by the owner.
+//  - Video ORIGINALS are write-once, private, owner-only, size/type limited.
+//  - Verification and support evidence are private to the uploader (+ reviewers).
+//  - Candidate frames / derivatives are written only by the media worker.
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() { return request.auth != null; }
+    function isReviewer() { return signedIn() && (request.auth.token.admin == true || request.auth.token.reviewer == true); }
+    function listingOwner(listingId) {
+      return signedIn() && firestore.get(/databases/(default)/documents/listings/$(listingId)).data.agentId == request.auth.uid;
+    }
+    function isImage() { return request.resource.contentType.matches('image/(jpeg|png|webp|heic)'); }
+    function isVideo() { return request.resource.contentType.matches('video/(mp4|quicktime|x-m4v|3gpp|webm)'); }
+
+    // Listing photos (owner only; public read so listing pages work signed-out)
+    match /listings/images/{listingId}/{file} {
+      allow read: if true;
+      allow write: if listingOwner(listingId) && isImage() && request.resource.size < 12 * 1024 * 1024;
+      allow delete: if listingOwner(listingId);
+    }
+    // Published derivatives and reviewed stills — server only.
+    match /listings/{listingId}/media/{file} { allow read: if true; allow write: if false; }
+
+    // PRIVATE video originals: create-only, owner only, metadata must name the owner.
+    match /listing_originals/{listingId}/{uploadId}/{file} {
+      allow read: if isReviewer();
+      allow create: if listingOwner(listingId) && isVideo()
+        && request.resource.size < 300 * 1024 * 1024
+        && request.resource.metadata.ownerUid == request.auth.uid;
+      allow update, delete: if false;
+    }
+    // Candidate frames: the owner may look at them before confirming.
+    match /listing_candidates/{listingId}/{jobId}/{file} {
+      allow read: if listingOwner(listingId) || isReviewer();
+      allow write: if false;
+    }
+    match /listing_derivatives/{listingId}/{jobId}/{file} { allow read: if isReviewer(); allow write: if false; }
+
+    match /users/avatars/{file} {
+      allow read: if true;
+      allow write: if signedIn() && file == request.auth.uid + '.jpg' && isImage() && request.resource.size < 5 * 1024 * 1024;
+    }
+    match /chats/{chatId}/{file} {
+      allow read: if signedIn() && request.auth.uid in firestore.get(/databases/(default)/documents/chats/$(chatId)).data.participantIds;
+      allow write: if signedIn() && isImage() && request.resource.size < 8 * 1024 * 1024
+        && request.auth.uid in firestore.get(/databases/(default)/documents/chats/$(chatId)).data.participantIds;
+    }
+    // Verification documents: write-once by the applicant, read by reviewers only
+    // (they use short signed URLs from getReviewDocumentUrl).
+    match /verification/{uid}/{requestId}/{file} {
+      allow create: if signedIn() && request.auth.uid == uid && request.resource.size < 15 * 1024 * 1024
+        && (isImage() || isVideo());
+      allow read: if isReviewer();
+      allow update, delete: if false;
+    }
+    // Support / report evidence: private to the uploader and reviewers.
+    match /support/{uid}/{file} {
+      allow create: if signedIn() && request.auth.uid == uid && request.resource.size < 10 * 1024 * 1024
+        && (isImage() || request.resource.contentType == 'application/pdf');
+      allow read: if signedIn() && (request.auth.uid == uid || isReviewer());
+    }
+    // Private "My home" documents
+    match /home/{uid}/{file} {
+      allow read, write: if signedIn() && request.auth.uid == uid && request.resource.size < 10 * 1024 * 1024;
+    }
+    match /{allPaths=**} { allow read, write: if false; }
+  }
+}

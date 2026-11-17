@@ -206,7 +206,7 @@ class AuthService {
       createdAt: DateTime.now(),
     );
 
-    await _db.collection(AppConstants.colUsers).doc(uid).set(user.toMap());
+    await _db.collection(AppConstants.colUsers).doc(uid).set(user.toCreateMap());
   }
 
   Future<void> updateUserProfile({
@@ -215,13 +215,19 @@ class AuthService {
     String? email,
     String? bio,
     String? agencyName,
-    XFile? avatarXFile, // ← Changed from File to XFile
+    String? city,
+    String? role,
+    Map<String, dynamic>? preferences,
+    XFile? avatarXFile,
   }) async {
     final updates = <String, dynamic>{};
     if (name != null) updates['name'] = name;
     if (email != null) updates['email'] = email;
     if (bio != null) updates['bio'] = bio;
     if (agencyName != null) updates['agencyName'] = agencyName;
+    if (city != null) updates['city'] = city;
+    if (role != null && ['tenant', 'agent', 'landlord'].contains(role)) updates['role'] = role;
+    if (preferences != null) updates['preferences'] = preferences;
 
     if (avatarXFile != null) {
       final photoUrl = await _uploadAvatarFromXFile(uid, avatarXFile);
@@ -230,6 +236,12 @@ class AuthService {
 
     updates['updatedAt'] = FieldValue.serverTimestamp();
     await _db.collection(AppConstants.colUsers).doc(uid).update(updates);
+  }
+
+  Future<Map<String, dynamic>> getPreferences(String uid) async {
+    final snap = await _db.collection(AppConstants.colUsers).doc(uid).get();
+    final p = (snap.data() ?? const {})['preferences'];
+    return p is Map ? Map<String, dynamic>.from(p) : <String, dynamic>{};
   }
 
   Future<void> updateFCMToken(String uid, String token) async {
@@ -255,9 +267,9 @@ class AuthService {
         minWidth: 400, minHeight: 400, quality: 75);
     final ref = _storage.ref('${AppConstants.pathUserAvatars}/$uid.jpg');
     if (compressed != null) {
-      await ref.putData(compressed);
+      await ref.putData(compressed, SettableMetadata(contentType: 'image/jpeg'));
     } else {
-      await ref.putFile(file);
+      await ref.putFile(file, SettableMetadata(contentType: 'image/jpeg'));
     }
     return await ref.getDownloadURL();
   }

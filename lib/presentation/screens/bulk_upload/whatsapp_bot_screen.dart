@@ -1,274 +1,88 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/app_theme.dart';
+import '../../../core/widgets/common_widgets.dart';
 
-/// Info screen showing agents how to use the WhatsApp listing bot.
-class WhatsAppBotScreen extends StatelessWidget {
-  const WhatsAppBotScreen({super.key});
+/// Number of the Propsure WhatsApp assist line. Replace with the approved
+/// WhatsApp Business number before launch (see DEPLOY.md).
+const String kWhatsAppAssistNumber = '14155238886';
 
-  // Your Twilio WhatsApp number — replace with real number after setup
-  static const _whatsappNumber = '+14155238886'; // Twilio sandbox default
-  static const _whatsappLink = 'https://wa.me/14155238886';
+const String _format = '''For rent: 2-bedroom flat
+Area: Gwarinpa, Abuja
+Annual rent: ₦2,400,000
+Other move-in charges: (agency fee, caution, legal)
+Video attached''';
+
+/// Assisted pilot: the agent sends a walkthrough video and details; we
+/// prepare a DRAFT. Nothing goes live until the agent confirms it in the app.
+class WhatsAppAssistScreen extends StatelessWidget {
+  const WhatsAppAssistScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    Widget step(String n, IconData icon, String label) => Expanded(
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
+            decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(AppRadius.md), border: Border.all(color: AppColors.border)),
+            child: Column(children: [
+              CircleAvatar(radius: 14, backgroundColor: AppColors.primaryPale, child: Text(n, style: AppText.title.copyWith(color: AppColors.primary))),
+              const SizedBox(height: 8),
+              Icon(icon, size: 28, color: AppColors.primary),
+              const SizedBox(height: 6),
+              Text(label, textAlign: TextAlign.center, style: AppText.small.copyWith(fontWeight: FontWeight.w600, color: AppColors.text)),
+            ]),
+          ),
+        );
     return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(
-        title: Text('WhatsApp Listing Bot',
-            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
-      ),
-      body: ListView(padding: const EdgeInsets.all(16), children: [
-        // Hero
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-              color: const Color(0xFF25D366),
-              borderRadius: BorderRadius.circular(18)),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('📲', style: TextStyle(fontSize: 40)),
-            const SizedBox(height: 12),
-            Text('List properties via WhatsApp',
-                style: GoogleFonts.plusJakartaSans(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white)),
-            const SizedBox(height: 6),
-            const Text(
-                'Send a message to our WhatsApp number and our bot will automatically create a draft listing for you — no app needed.',
-                style: TextStyle(
-                    color: Colors.white70, fontSize: 13, height: 1.5)),
-          ]),
-        ),
-        const SizedBox(height: 24),
-
-        Text('How it works', style: Theme.of(context).textTheme.headlineSmall),
+      backgroundColor: AppColors.surface,
+      appBar: const PsTopBar(title: 'List from WhatsApp'),
+      body: ListView(padding: kPagePadding, children: [
+        const PsHeadline('Send your video.', accent: 'Review your listing.', size: 36),
         const SizedBox(height: 16),
-        ...[
-          (
-            '1',
-            'Register your number',
-            'Your phone number must be linked to your Propsure agent account.',
-            Icons.phone_outlined
-          ),
-          (
-            '2',
-            'Message our bot',
-            'Send your property details to our WhatsApp number using the format below.',
-            Icons.chat_bubble_outline_rounded
-          ),
-          (
-            '3',
-            'Bot creates draft',
-            'Within seconds, a draft listing appears in your Propsure account.',
-            Icons.auto_awesome_outlined
-          ),
-          (
-            '4',
-            'Review and publish',
-            'Open the app, add photos, review details, then publish.',
-            Icons.publish_rounded
-          ),
-        ].map((step) {
-          final (num, title, desc, icon) = step;
-          return Container(
-            margin: const EdgeInsets.only(bottom: 10),
+        Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          step('1', Icons.videocam_outlined, 'Send a walkthrough + details'),
+          const Padding(padding: EdgeInsets.symmetric(horizontal: 4), child: Icon(Icons.arrow_forward_rounded, size: 18, color: AppColors.primary)),
+          step('2', Icons.description_outlined, 'We prepare a draft'),
+          const Padding(padding: EdgeInsets.symmetric(horizontal: 4), child: Icon(Icons.arrow_forward_rounded, size: 18, color: AppColors.primary)),
+          step('3', Icons.check_circle_outline_rounded, 'You confirm and publish'),
+        ]),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(color: const Color(0xFFEDE8DA), borderRadius: BorderRadius.circular(AppRadius.md)),
+          child: Container(
             padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.border)),
-            child: Row(children: [
-              Container(
-                  width: 36,
-                  height: 36,
-                  decoration: const BoxDecoration(
-                      color: AppColors.primaryPale, shape: BoxShape.circle),
-                  child: Center(
-                      child: Text(num,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.primary,
-                              fontSize: 15)))),
-              const SizedBox(width: 12),
-              Expanded(
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                    Text(title,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13,
-                            color: AppColors.text)),
-                    const SizedBox(height: 2),
-                    Text(desc,
-                        style: const TextStyle(
-                            fontSize: 12, color: AppColors.text2)),
-                  ])),
-              Icon(icon, color: AppColors.primary, size: 20),
+            decoration: BoxDecoration(color: const Color(0xFFDDF2D0), borderRadius: BorderRadius.circular(AppRadius.md)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(_format, style: AppText.body.copyWith(height: 1.5)),
+              const SizedBox(height: 6),
+              Align(alignment: Alignment.centerRight, child: Text('Example message', style: AppText.caption)),
             ]),
-          );
+          ),
+        ),
+        const SizedBox(height: 12),
+        PsCard(child: Row(children: [
+          const PsIconCircle(Icons.shield_outlined, size: 48),
+          const SizedBox(width: 14),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('You stay in control', style: AppText.h3), Text('Nothing goes live without your review.', style: AppText.small)])),
+        ])),
+        const SizedBox(height: 16),
+        PsButton('Copy message format', kind: PsButtonKind.outline, icon: Icons.copy_rounded, onPressed: () async {
+          await Clipboard.setData(const ClipboardData(text: _format));
+          if (context.mounted) showPsSnack(context, 'Message format copied');
         }),
-        const SizedBox(height: 20),
-
-        // Message format
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-              color: AppColors.primaryDark,
-              borderRadius: BorderRadius.circular(14)),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              const Text('📋 Message Format',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 14)),
-              const Spacer(),
-              GestureDetector(
-                onTap: () {
-                  const text =
-                      'LIST: 3 bedroom flat, Maitama, ₦2M/year, furnished, generator, AC';
-                  Clipboard.setData(const ClipboardData(text: text));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Format copied!')));
-                },
-                child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(6)),
-                    child: const Text('Copy',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700))),
-              ),
-            ]),
-            const SizedBox(height: 12),
-            Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(10)),
-                child: const Text(
-                    'LIST: [type], [area], [price], [beds] bedroom, [baths] bathroom, [features]',
-                    style: TextStyle(
-                        color: Color(0xFF25D366),
-                        fontSize: 12,
-                        fontFamily: 'monospace',
-                        height: 1.5))),
-            const SizedBox(height: 12),
-            const Text('Example:',
-                style: TextStyle(color: Colors.white60, fontSize: 11)),
-            const SizedBox(height: 6),
-            Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(10)),
-                child: const Text(
-                    'LIST: 3 bedroom flat, Maitama, ₦2M/year, furnished, generator, swimming pool, AC',
-                    style: TextStyle(
-                        color: Colors.white, fontSize: 12, height: 1.5))),
-          ]),
-        ),
-        const SizedBox(height: 20),
-
-        // Commands reference
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppColors.border)),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Bot Commands',
-                style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13,
-                    color: AppColors.text)),
-            const SizedBox(height: 12),
-            ...[
-              ('LIST: [details]', 'Create a new draft listing'),
-              ('STATUS', 'See your active listing count'),
-              ('HELP', 'Show available commands'),
-            ].map((cmd) {
-              final (command, desc) = cmd;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Row(children: [
-                  Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 9, vertical: 4),
-                      decoration: BoxDecoration(
-                          color: AppColors.bg,
-                          borderRadius: BorderRadius.circular(6)),
-                      child: Text(command,
-                          style: const TextStyle(
-                              fontSize: 11,
-                              fontFamily: 'monospace',
-                              color: AppColors.primary,
-                              fontWeight: FontWeight.w700))),
-                  const SizedBox(width: 10),
-                  Expanded(
-                      child: Text(desc,
-                          style: const TextStyle(
-                              fontSize: 12, color: AppColors.text2))),
-                ]),
-              );
-            }),
-          ]),
-        ),
+        const SizedBox(height: 12),
+        PsButton('Open WhatsApp', trailingIcon: Icons.arrow_forward_rounded, icon: Icons.chat_rounded, onPressed: () async {
+          final ok = await launchUrl(Uri.parse('https://wa.me/$kWhatsAppAssistNumber?text=${Uri.encodeComponent('Hi Propsure, I would like to list a home.')}'), mode: LaunchMode.externalApplication);
+          if (!ok && context.mounted) showPsSnack(context, 'Could not open WhatsApp.');
+        }),
+        const SizedBox(height: 12),
+        Center(child: Text('Assisted pilot · by permission', style: AppText.caption)),
+        const SizedBox(height: 8),
+        Center(child: PsLink('Prefer to list in the app?', onTap: () => context.push('/listing/new'))),
         const SizedBox(height: 24),
-
-        // WhatsApp number display
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-              color: const Color(0xFFDCFCE7),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                  color: const Color(0xFF25D366).withValues(alpha: 0.3))),
-          child: Column(children: [
-            const Text('Our WhatsApp Number',
-                style: TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF166534),
-                    fontWeight: FontWeight.w600)),
-            const SizedBox(height: 6),
-            Text(_whatsappNumber,
-                style: GoogleFonts.plusJakartaSans(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    color: const Color(0xFF166534))),
-            const SizedBox(height: 14),
-            SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () async {
-                    final uri = Uri.parse(_whatsappLink);
-                    if (await canLaunchUrl(uri)) {
-                      launchUrl(uri, mode: LaunchMode.externalApplication);
-                    }
-                  },
-                  icon: const Text('📲', style: TextStyle(fontSize: 16)),
-                  label: const Text('Open in WhatsApp',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w700, color: Colors.white)),
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF25D366),
-                      padding: const EdgeInsets.symmetric(vertical: 13)),
-                )),
-          ]),
-        ),
-        const SizedBox(height: 80),
       ]),
     );
   }

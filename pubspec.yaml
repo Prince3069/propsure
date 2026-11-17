@@ -1,7 +1,7 @@
 name: propsure
 description: Nigeria's Most Trusted Property Rental Platform
 publish_to: 'none'
-version: 1.0.9+10   # ← Updated version code to 4
+version: 1.1.0+11 # ← Updated version code to 4
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
@@ -64,6 +64,8 @@ dependencies:
   geoflutterfire_plus: ^0.0.21
   flutter_launcher_icons: ^0.14.4
   geoflutterfire2: ^2.3.15
+  cloud_functions: ^4.7.6
+  video_player: ^2.14.1
 
   # REMOVED: permission_handler - no longer needed for photo/video picker
   # If you use permission_handler elsewhere, keep it, otherwise remove:

@@ -1,883 +1,265 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/app_theme.dart';
+import '../../../core/utils/booking_labels.dart';
+import '../../../core/utils/format.dart';
+import '../../../core/widgets/common_widgets.dart';
 import '../../../data/models/chat_model.dart';
+import '../../providers/actions.dart';
 import '../../providers/app_providers.dart';
 
+/// Conversation. The property stays pinned with price and a way back; a
+/// structured inspection request lives here, and the safety reminder is always
+/// visible. Attachments are images only and private to the two participants.
 class ChatScreen extends ConsumerStatefulWidget {
   final String chatId;
   const ChatScreen({super.key, required this.chatId});
-
   @override
-  ConsumerState<ChatScreen> createState() => _ChatScreenState();
+  ConsumerState<ChatScreen> createState() => _State();
 }
 
-class _ChatScreenState extends ConsumerState<ChatScreen> {
-  final _msgCtrl = TextEditingController();
-  final _scrollCtrl = ScrollController();
+class _State extends ConsumerState<ChatScreen> {
+  final _text = TextEditingController();
+  final _scroll = ScrollController();
   bool _sending = false;
-  bool _sendingImage = false;
-  bool _hasText = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _msgCtrl.addListener(
-        () => setState(() => _hasText = _msgCtrl.text.trim().isNotEmpty));
-    WidgetsBinding.instance.addPostFrameCallback((_) => _markRead());
-  }
+  bool _draftApplied = false;
 
   @override
   void dispose() {
-    _msgCtrl.dispose();
-    _scrollCtrl.dispose();
+    _text.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
-  void _markRead() {
-    final userId = ref.read(currentUserIdProvider);
-    if (userId == null) return;
-    ref
-        .read(chatRepositoryProvider)
-        .markMessagesAsRead(chatId: widget.chatId, userId: userId);
-  }
-
-  // ─── REPORT / BLOCK — previously the AppBar menu had these two items
-  // wired to `onSelected: (v) {}`, i.e. literally nothing happened when
-  // tapped. ───
-  Future<void> _reportUser(String otherId, String otherName) async {
-    final userId = ref.read(currentUserIdProvider);
-    if (userId == null || otherId.isEmpty) return;
-    final reason = await showModalBottomSheet<String>(
-      context: context,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text('Report $otherName',
-                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-            ),
-          ),
-          for (final reason in const [
-            'Scam or fraud',
-            'Harassment or abuse',
-            'Spam',
-            'Impersonation',
-            'Something else',
-          ])
-            ListTile(title: Text(reason), onTap: () => Navigator.pop(context, reason)),
-          const SizedBox(height: 8),
-        ]),
-      ),
-    );
-    if (reason == null || !mounted) return;
-    try {
-      await ref.read(reportRepositoryProvider).submitReport(
-            reporterId: userId,
-            targetType: 'agent',
-            targetId: otherId,
-            reason: reason,
-            note: 'Filed from chat ${widget.chatId}',
-          );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Report submitted. Thank you.')));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not submit report: $e')));
-      }
+  ChatModel? _chat(String uid) {
+    final chats = ref.read(userChatsProvider(uid)).asData?.value ?? const [];
+    for (final c in chats) {
+      if (c.id == widget.chatId) return c;
     }
+    return null;
   }
 
-  Future<void> _toggleBlock(bool currentlyBlocked) async {
-    final userId = ref.read(currentUserIdProvider);
-    if (userId == null) return;
-    final repo = ref.read(chatRepositoryProvider);
-    if (currentlyBlocked) {
-      await repo.unblockChat(widget.chatId, userId);
-    } else {
-      final confirm = await showDialog<bool>(
-        context: context,
-        builder: (_) => AlertDialog(
-          title: const Text('Block this conversation?'),
-          content: const Text(
-              "You won't be able to send messages here until you unblock it."),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel')),
-            TextButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('Block', style: TextStyle(color: AppColors.error))),
-          ],
-        ),
-      );
-      if (confirm == true) await repo.blockChat(widget.chatId, userId);
-    }
-  }
-
-  Future<void> _send() async {
-    final text = _msgCtrl.text.trim();
-    if (text.isEmpty || _sending) return;
-    final userId = ref.read(currentUserIdProvider);
-    final user = ref.read(currentUserModelProvider).value;
-    if (userId == null || user == null) return;
-
+  Future<void> _send(ChatModel chat, String uid, String name, String? photo) async {
+    final t = _text.text.trim();
+    if (t.isEmpty || _sending) return;
     setState(() => _sending = true);
-    _msgCtrl.clear();
-
-    final chat = ref
-        .read(userChatsProvider(userId))
-        .value
-        ?.firstWhere((c) => c.id == widget.chatId, orElse: () => _emptyChat());
-    await ref.read(chatRepositoryProvider).sendTextMessage(
-          chatId: widget.chatId,
-          senderId: userId,
-          senderName: user.name,
-          senderPhoto: user.profilePhoto,
-          text: text,
-          participantIds: chat?.participantIds ?? [userId],
-        );
-
+    final ok = await runAction(context, () => ref.read(chatRepositoryProvider).sendTextMessage(
+          chatId: chat.id, senderId: uid, senderName: name, senderPhoto: photo, text: t, participantIds: chat.participantIds));
+    if (!mounted) return;
     setState(() => _sending = false);
-    _scrollToBottom();
+    if (ok) _text.clear();
   }
 
-  Future<void> _sendImage() async {
-    final picker = ImagePicker();
-    final picked =
-        await picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
-    if (picked == null) return;
-
-    final userId = ref.read(currentUserIdProvider);
-    final user = ref.read(currentUserModelProvider).value;
-    if (userId == null || user == null) return;
-
-    setState(() => _sendingImage = true);
-    final imgChat = ref
-        .read(userChatsProvider(userId))
-        .value
-        ?.firstWhere((c) => c.id == widget.chatId, orElse: () => _emptyChat());
-    await ref.read(chatRepositoryProvider).sendImageMessage(
-          chatId: widget.chatId,
-          senderId: userId,
-          senderName: user.name,
-          senderPhoto: user.profilePhoto,
-          imageFile: File(picked.path),
-          participantIds: imgChat?.participantIds ?? [userId],
-        );
-    setState(() => _sendingImage = false);
-    _scrollToBottom();
+  Future<void> _attach(ChatModel chat, String uid, String name, String? photo) async {
+    final x = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 80, maxWidth: 1600);
+    if (x == null || !mounted) return;
+    await runAction(context, () => ref.read(chatRepositoryProvider).sendImageMessage(
+          chatId: chat.id, senderId: uid, senderName: name, senderPhoto: photo, imageFile: File(x.path), participantIds: chat.participantIds));
   }
 
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollCtrl.hasClients) {
-        _scrollCtrl.animateTo(0,
-            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
-      }
-    });
+  Future<void> _requestInspection(ChatModel chat, String uid) async {
+    final user = ref.read(currentUserModelProvider).asData?.value;
+    if (user == null || chat.listingId == null) return;
+    final now = DateTime.now();
+    final d = await showDatePicker(context: context, initialDate: now.add(const Duration(days: 1)), firstDate: now, lastDate: now.add(const Duration(days: 60)), helpText: 'Choose a day to visit');
+    if (d == null || !mounted) return;
+    final t = await showTimePicker(context: context, initialTime: const TimeOfDay(hour: 11, minute: 0), helpText: 'Choose a time');
+    if (t == null || !mounted) return;
+    final when = DateTime(d.year, d.month, d.day, t.hour, t.minute);
+    final agentId = chat.otherParticipantId(uid);
+    await runAction(context, () async {
+      final id = await ref.read(bookingRepositoryProvider).createBooking(
+            listingId: chat.listingId!,
+            agentId: agentId,
+            userId: uid,
+            userName: user.displayName,
+            userPhone: user.phone,
+            listingTitle: chat.listingTitle ?? 'Home',
+            dateTime: when,
+            listingThumbnail: chat.listingThumbnail,
+            agentName: chat.otherParticipantName(uid),
+          );
+      await ref.read(chatRepositoryProvider).sendBookingCard(
+            chatId: chat.id, senderId: uid, senderName: user.displayName,
+            bookingData: {'bookingId': id, 'dateTime': when.toIso8601String(), 'status': 'pending'},
+            participantIds: chat.participantIds);
+    }, success: 'Inspection requested. It is not confirmed until the agent accepts.');
   }
 
   @override
   Widget build(BuildContext context) {
-    final userId = ref.watch(currentUserIdProvider) ?? '';
-    final chatAsync = ref.watch(userChatsProvider(userId));
-    final messagesAsync = ref.watch(chatMessagesProvider(widget.chatId));
-
-    // Get the chat object to show listing context bar
-    final chat = chatAsync.value
-        ?.firstWhere((c) => c.id == widget.chatId, orElse: () => _emptyChat());
-
-    final otherId = chat?.participantIds
-            .firstWhere((id) => id != userId, orElse: () => '') ??
-        '';
-    final otherName = chat?.participantNames[otherId] ?? 'Agent';
-    final otherPhoto = chat?.participantPhotos[otherId];
+    final uid = ref.watch(currentUserIdProvider);
+    final user = ref.watch(currentUserModelProvider).asData?.value;
+    if (uid == null) return const Scaffold(body: PsEmpty(icon: Icons.lock_outline_rounded, title: 'Sign in to continue', message: 'Conversations are private to the people in them.'));
+    ref.watch(userChatsProvider(uid));
+    final chat = _chat(uid);
+    final msgs = ref.watch(chatMessagesProvider(widget.chatId));
+    if (chat == null) {
+      return Scaffold(appBar: const PsTopBar(), body: ref.watch(userChatsProvider(uid)).isLoading ? const Center(child: CircularProgressIndicator()) : const PsEmpty(icon: Icons.chat_bubble_outline_rounded, title: 'Conversation not found', message: 'It may have been archived.'));
+    }
+    if (!_draftApplied) {
+      _draftApplied = true;
+      final d = GoRouterState.of(context).uri.queryParameters['draft'];
+      if (d != null && d.isNotEmpty) _text.text = d;
+    }
+    final otherId = chat.otherParticipantId(uid);
+    final other = ref.watch(publicProfileProvider(otherId)).asData?.value;
+    final blocked = chat.blockedBy.isNotEmpty;
+    ref.read(chatRepositoryProvider).markMessagesAsRead(chatId: chat.id, userId: uid).catchError((_) {});
 
     return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: _ChatAppBar(
-        name: otherName, photo: otherPhoto, chatId: widget.chatId,
-        agentPhone: '', // fetched from listing if needed
-        isBlockedByMe: chat?.isBlockedBy(userId) ?? false,
-        onReport: () => _reportUser(otherId, otherName),
-        onBlockToggle: () => _toggleBlock(chat?.isBlockedBy(userId) ?? false),
-      ),
-      body: Column(children: [
-        if (chat?.isBlockedBy(userId) ?? false)
+      backgroundColor: AppColors.surface,
+      body: SafeArea(
+        child: Column(children: [
           Container(
-            width: double.infinity,
-            color: AppColors.error.withOpacity(0.08),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: const EdgeInsets.fromLTRB(4, 4, 8, 4),
             child: Row(children: [
-              const Icon(Icons.block_rounded, size: 16, color: AppColors.error),
-              const SizedBox(width: 8),
-              const Expanded(
-                  child: Text('You blocked this conversation. Unblock to reply.',
-                      style: TextStyle(fontSize: 12, color: AppColors.error))),
-              TextButton(
-                onPressed: () => _toggleBlock(true),
-                child: const Text('Unblock'),
+              PsIconButton(icon: Icons.arrow_back_rounded, tooltip: 'Back', onPressed: () => context.canPop() ? context.pop() : context.go('/messages')),
+              PsAvatar(url: chat.otherParticipantPhoto(uid), name: chat.otherParticipantName(uid), size: 44),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(chat.otherParticipantName(uid), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title),
+                if (other?.identityReviewed ?? false) Row(children: [const Icon(Icons.verified_user_outlined, size: 16, color: AppColors.primary), const SizedBox(width: 4), Text('Agent ID checked', style: AppText.caption)]),
+              ])),
+              PopupMenuButton<String>(
+                tooltip: 'More',
+                onSelected: (v) async {
+                  final repo = ref.read(chatRepositoryProvider);
+                  if (v == 'report' && chat.listingId != null) context.push('/listing/${chat.listingId}/report');
+                  if (v == 'block') await runAction(context, () => chat.isBlockedBy(uid) ? repo.unblockChat(chat.id, uid) : repo.blockChat(chat.id, uid));
+                  if (v == 'mute') await runAction(context, () => chat.isMutedBy(uid) ? repo.unmuteChat(chat.id, uid) : repo.muteChat(chat.id, uid));
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'report', child: Text('Report this listing')),
+                  PopupMenuItem(value: 'mute', child: Text(chat.isMutedBy(uid) ? 'Unmute' : 'Mute')),
+                  PopupMenuItem(value: 'block', child: Text(chat.isBlockedBy(uid) ? 'Unblock' : 'Block')),
+                ],
               ),
             ]),
           ),
-        // Listing context bar
-        if (chat?.listingTitle != null)
-          _ListingContextBar(
-            title: chat!.listingTitle!,
-            thumbnail: chat.listingThumbnail,
-            listingId: chat.listingId ?? '',
-          ),
-        // Messages
-        Expanded(
-          child: messagesAsync.when(
-            data: (messages) {
-              if (messages.isEmpty) {
-                return const _EmptyChatPlaceholder();
-              }
-              return ListView.builder(
-                controller: _scrollCtrl,
-                reverse: true,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                itemCount: messages.length,
-                itemBuilder: (_, i) {
-                  final msg = messages[i];
-                  final isMe = msg.senderId == userId;
-                  final showDate = i == messages.length - 1 ||
-                      !_sameDay(
-                          messages[i].createdAt, messages[i + 1].createdAt);
-                  final showAvatar = !isMe &&
-                      (i == 0 || messages[i - 1].senderId != msg.senderId);
-
-                  return Column(children: [
-                    if (showDate) _DateDivider(date: msg.createdAt),
-                    _MessageBubble(
-                      message: msg,
-                      isMe: isMe,
-                      showAvatar: showAvatar,
-                      senderPhoto: isMe ? null : otherPhoto,
-                      senderInitial: otherName.isNotEmpty ? otherName[0] : '?',
+          if (chat.listingId != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: ref.watch(listingByIdProvider(chat.listingId!)).maybeWhen(
+                    data: (l) => PsCard(
+                      padding: const EdgeInsets.all(8),
+                      child: Row(children: [
+                        SizedBox(width: 72, height: 56, child: PsNetImage(l?.coverUrl ?? chat.listingThumbnail, radius: BorderRadius.circular(10))),
+                        const SizedBox(width: 12),
+                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(chat.listingTitle ?? l?.title ?? 'Home', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label),
+                          if (l != null) Text(l.priceLabel, style: AppText.title.copyWith(color: AppColors.primary)),
+                        ])),
+                        PsButton('View', expand: false, kind: PsButtonKind.ghost, onPressed: () => context.push('/listing/${chat.listingId}')),
+                      ]),
                     ),
-                  ]);
-                },
-              );
-            },
-            loading: () => const Center(child: CircularProgressIndicator()),
-            // Friendly failure state instead of the raw exception.
-            error: (e, _) => const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Text('Couldn\'t load this conversation.',
-                    style: TextStyle(fontSize: 13, color: AppColors.text3)),
-              ),
-            ),
-          ),
-        ),
-        // Input bar — hidden once the current user has blocked this
-        // conversation, so they can't send further messages until they
-        // unblock (the banner above gives them that action).
-        if (!(chat?.isBlockedBy(userId) ?? false))
-          _ChatInputBar(
-            controller: _msgCtrl,
-            hasText: _hasText,
-            sending: _sending,
-            sendingImage: _sendingImage,
-            onSend: _send,
-            onImagePick: _sendImage,
-          ),
-      ]),
-    );
-  }
-
-  bool _sameDay(DateTime a, DateTime b) =>
-      a.year == b.year && a.month == b.month && a.day == b.day;
-
-  ChatModel _emptyChat() => ChatModel(
-        id: '',
-        participantIds: [],
-        participantNames: {},
-        participantPhotos: {},
-        unreadCounts: {},
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-        listingId: '',
-        isArchived: false,
-      );
-}
-
-// ─── APP BAR ─────────────────────────────────────────────────────────────
-class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
-  final String name, chatId, agentPhone;
-  final String? photo;
-  final bool isBlockedByMe;
-  final VoidCallback onReport;
-  final VoidCallback onBlockToggle;
-  const _ChatAppBar(
-      {required this.name,
-      this.photo,
-      required this.chatId,
-      required this.agentPhone,
-      this.isBlockedByMe = false,
-      required this.onReport,
-      required this.onBlockToggle});
-
-  @override
-  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
-
-  @override
-  Widget build(BuildContext context) {
-    return AppBar(
-      backgroundColor: AppColors.surface,
-      leading: IconButton(
-        icon: const Icon(Icons.arrow_back_rounded),
-        onPressed: () => context.pop(),
-      ),
-      titleSpacing: 0,
-      title: Row(children: [
-        CircleAvatar(
-          radius: 18,
-          backgroundColor: AppColors.primaryPale2,
-          backgroundImage:
-              photo != null && photo!.isNotEmpty ? NetworkImage(photo!) : null,
-          child: photo == null || photo!.isEmpty
-              ? Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
-                  style: const TextStyle(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 13))
-              : null,
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(name,
-              style: GoogleFonts.plusJakartaSans(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.text)),
-          const Text('● Online',
-              style: TextStyle(
-                  fontSize: 10,
-                  color: AppColors.success,
-                  fontWeight: FontWeight.w500)),
-        ])),
-      ]),
-      actions: [
-        if (agentPhone.isNotEmpty)
-          IconButton(
-            icon: const Icon(Icons.call_rounded),
-            onPressed: () async {
-              final uri = Uri(scheme: 'tel', path: agentPhone);
-              if (await canLaunchUrl(uri)) launchUrl(uri);
-            },
-          ),
-        PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert_rounded),
-          onSelected: (v) {
-            if (v == 'report') onReport();
-            if (v == 'block') onBlockToggle();
-          },
-          itemBuilder: (_) => [
-            const PopupMenuItem(value: 'report', child: Text('Report')),
-            PopupMenuItem(
-                value: 'block',
-                child: Text(isBlockedByMe ? 'Unblock' : 'Block')),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-// ─── LISTING CONTEXT BAR ─────────────────────────────────────────────────
-class _ListingContextBar extends StatelessWidget {
-  final String title, listingId;
-  final String? thumbnail;
-  const _ListingContextBar(
-      {required this.title, this.thumbnail, required this.listingId});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-      decoration: const BoxDecoration(
-        color: AppColors.primaryPale,
-        border: Border(
-            top: BorderSide(color: AppColors.primaryPale2),
-            bottom: BorderSide(color: AppColors.border)),
-      ),
-      child: Row(children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: SizedBox(
-            width: 38,
-            height: 38,
-            child: thumbnail != null && thumbnail!.isNotEmpty
-                ? CachedNetworkImage(imageUrl: thumbnail!, fit: BoxFit.cover)
-                : Container(
-                    color: AppColors.primaryPale2,
-                    child: const Icon(Icons.home_outlined,
-                        size: 20, color: AppColors.primary)),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title,
-              style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.text),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis),
-          const Text('Property enquiry',
-              style: TextStyle(fontSize: 10, color: AppColors.primary)),
-        ])),
-        GestureDetector(
-          onTap: () => context.push('/listing/$listingId'),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-                color: AppColors.primary,
-                borderRadius: BorderRadius.circular(8)),
-            child: const Text('View',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700)),
-          ),
-        ),
-      ]),
-    );
-  }
-}
-
-// ─── MESSAGE BUBBLE ──────────────────────────────────────────────────────
-class _MessageBubble extends StatelessWidget {
-  final ChatMessage message;
-  final bool isMe, showAvatar;
-  final String? senderPhoto;
-  final String senderInitial;
-  const _MessageBubble(
-      {required this.message,
-      required this.isMe,
-      required this.showAvatar,
-      this.senderPhoto,
-      required this.senderInitial});
-
-  @override
-  Widget build(BuildContext context) {
-    if (message.isDeleted) {
-      return Align(
-        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 2),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
-            decoration: BoxDecoration(
-              color: AppColors.bg,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: const Text('🚫 Message deleted',
-                style: TextStyle(
-                    fontSize: 12,
-                    color: AppColors.text3,
-                    fontStyle: FontStyle.italic)),
-          ),
-        ),
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        mainAxisAlignment:
-            isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          if (!isMe) ...[
-            if (showAvatar)
-              CircleAvatar(
-                radius: 14,
-                backgroundColor: AppColors.primaryPale2,
-                backgroundImage: senderPhoto != null && senderPhoto!.isNotEmpty
-                    ? NetworkImage(senderPhoto!)
-                    : null,
-                child: senderPhoto == null || senderPhoto!.isEmpty
-                    ? Text(senderInitial,
-                        style: const TextStyle(
-                            color: AppColors.primary,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800))
-                    : null,
-              )
-            else
-              const SizedBox(width: 28),
-            const SizedBox(width: 6),
-          ],
-          Flexible(
-            child: GestureDetector(
-              onLongPress: () => _showOptions(context),
-              child: Column(
-                crossAxisAlignment:
-                    isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                children: [
-                  if (message.type == 'image')
-                    _ImageBubble(imageUrl: message.imageUrl ?? '', isMe: isMe)
-                  else
-                    _TextBubble(text: message.text ?? '', isMe: isMe),
-                  const SizedBox(height: 2),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        _fmtTime(message.createdAt),
-                        style: const TextStyle(
-                            fontSize: 9, color: AppColors.text3),
-                      ),
-                      if (isMe) ...[
-                        const SizedBox(width: 3),
-                        Icon(Icons.done_all_rounded,
-                            size: 12,
-                            color: message.isRead
-                                ? AppColors.info
-                                : AppColors.text3),
-                      ],
-                    ],
+                    orElse: () => const SizedBox.shrink(),
                   ),
-                ],
-              ),
+            ),
+          Expanded(
+            child: msgs.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (_, __) => PsError(onRetry: () => ref.invalidate(chatMessagesProvider(widget.chatId))),
+              data: (list) {
+                if (list.isEmpty) return Center(child: Padding(padding: const EdgeInsets.all(32), child: Text('Ask about availability, the full move-in cost or a viewing time.', textAlign: TextAlign.center, style: AppText.bodyMuted)));
+                return ListView.builder(
+                  controller: _scroll,
+                  reverse: true,
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  itemCount: list.length,
+                  itemBuilder: (_, i) => _Bubble(m: list[list.length - 1 - i], mine: list[list.length - 1 - i].senderId == uid, listingId: chat.listingId),
+                );
+              },
             ),
           ),
-          if (isMe) const SizedBox(width: 6),
-        ],
-      ),
-    );
-  }
-
-  void _showOptions(BuildContext context) {
-    HapticFeedback.mediumImpact();
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => Container(
-        decoration: const BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (chat.listingId != null && !blocked)
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), child: PsButton('Request inspection', kind: PsButtonKind.outline, icon: Icons.event_outlined, trailingIcon: Icons.chevron_right_rounded, onPressed: () => _requestInspection(chat, uid))),
           Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                  color: AppColors.border,
-                  borderRadius: BorderRadius.circular(2))),
-          const SizedBox(height: 16),
-          ListTile(
-              leading: const Icon(Icons.copy_rounded),
-              title: const Text('Copy message'),
-              onTap: () {
-                Clipboard.setData(ClipboardData(text: message.text ?? ''));
-                Navigator.pop(context);
-              }),
-          if (message.senderId == message.senderId)
-            ListTile(
-                leading: const Icon(Icons.delete_outline_rounded,
-                    color: AppColors.error),
-                title: const Text('Delete',
-                    style: TextStyle(color: AppColors.error)),
-                onTap: () => Navigator.pop(context)),
+            margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(color: AppColors.muted, borderRadius: BorderRadius.circular(AppRadius.sm)),
+            child: Row(children: [const Icon(Icons.shield_outlined, size: 18, color: AppColors.text2), const SizedBox(width: 8), Expanded(child: Text('Do not pay rent before independent checks.', style: AppText.caption))]),
+          ),
+          if (blocked)
+            Padding(padding: const EdgeInsets.all(16), child: Text(chat.isBlockedBy(uid) ? 'You blocked this conversation. Unblock it from the menu to reply.' : 'You can no longer reply here.', style: AppText.small))
+          else
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+              child: Row(children: [
+                Expanded(
+                  child: TextField(
+                    controller: _text,
+                    minLines: 1,
+                    maxLines: 4,
+                    textInputAction: TextInputAction.newline,
+                    decoration: InputDecoration(
+                      hintText: 'Ask about this home…',
+                      suffixIcon: PsIconButton(icon: Icons.attach_file_rounded, tooltip: 'Attach a photo', onPressed: () => _attach(chat, uid, user?.displayName ?? 'Me', user?.profilePhoto)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Material(
+                  color: AppColors.primary,
+                  shape: const CircleBorder(),
+                  child: InkWell(
+                    customBorder: const CircleBorder(),
+                    onTap: () => _send(chat, uid, user?.displayName ?? 'Me', user?.profilePhoto),
+                    child: SizedBox(width: 56, height: 56, child: Semantics(button: true, label: 'Send', child: _sending ? const Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white)) : const Icon(Icons.send_rounded, color: Colors.white))),
+                  ),
+                ),
+              ]),
+            ),
         ]),
       ),
     );
   }
-
-  String _fmtTime(DateTime dt) {
-    final h = dt.hour.toString().padLeft(2, '0');
-    final m = dt.minute.toString().padLeft(2, '0');
-    return '$h:$m';
-  }
 }
 
-class _TextBubble extends StatelessWidget {
-  final String text;
-  final bool isMe;
-  const _TextBubble({required this.text, required this.isMe});
+class _Bubble extends StatelessWidget {
+  final ChatMessage m;
+  final bool mine;
+  final String? listingId;
+  const _Bubble({required this.m, required this.mine, this.listingId});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      constraints:
-          BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-      decoration: BoxDecoration(
-        color: isMe ? AppColors.primary : AppColors.surface,
-        borderRadius: BorderRadius.only(
-          topLeft: const Radius.circular(16),
-          topRight: const Radius.circular(16),
-          bottomLeft: Radius.circular(isMe ? 16 : 4),
-          bottomRight: Radius.circular(isMe ? 4 : 16),
+    final time = '${m.createdAt.hour.toString().padLeft(2, '0')}:${m.createdAt.minute.toString().padLeft(2, '0')}';
+    Widget body;
+    if (m.isDeleted) {
+      body = Text('Message deleted', style: AppText.small.copyWith(fontStyle: FontStyle.italic, color: mine ? Colors.white70 : AppColors.text3));
+    } else if (m.type == 'image' && m.imageUrl != null) {
+      body = ClipRRect(borderRadius: BorderRadius.circular(12), child: SizedBox(width: 220, height: 160, child: PsNetImage(m.imageUrl, semanticLabel: 'Photo sent in chat')));
+    } else if (m.type == 'booking') {
+      final when = DateTime.tryParse('${m.bookingData?['dateTime']}');
+      body = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.event_outlined, size: 20, color: mine ? Colors.white : AppColors.primary), const SizedBox(width: 8), Text('Inspection requested', style: AppText.label.copyWith(color: mine ? Colors.white : AppColors.text))]),
+        if (when != null) Text(formatVisit(when), style: AppText.small.copyWith(color: mine ? Colors.white70 : AppColors.text2)),
+        Text('Not confirmed until the agent accepts.', style: AppText.caption.copyWith(color: mine ? Colors.white70 : AppColors.text3)),
+      ]);
+    } else {
+      body = Text(m.text ?? '', style: AppText.body.copyWith(color: mine ? Colors.white : AppColors.text));
+    }
+    return Align(
+      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+        decoration: BoxDecoration(
+          color: mine ? AppColors.primary : AppColors.card,
+          border: mine ? null : Border.all(color: AppColors.border),
+          borderRadius: BorderRadius.circular(18),
         ),
-        border: isMe ? null : Border.all(color: AppColors.border),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 4,
-              offset: const Offset(0, 2))
-        ],
+        child: Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+          Align(alignment: Alignment.centerLeft, child: body),
+          const SizedBox(height: 2),
+          Text(time, style: AppText.caption.copyWith(fontSize: 11.5, color: mine ? Colors.white70 : AppColors.text3)),
+        ]),
       ),
-      child: Text(text,
-          style: TextStyle(
-              fontSize: 13,
-              color: isMe ? Colors.white : AppColors.text,
-              height: 1.45)),
-    );
-  }
-}
-
-class _ImageBubble extends StatelessWidget {
-  final String imageUrl;
-  final bool isMe;
-  const _ImageBubble({required this.imageUrl, required this.isMe});
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: GestureDetector(
-        onTap: () => _showFullImage(context),
-        child: CachedNetworkImage(
-          imageUrl: imageUrl,
-          width: 200,
-          height: 160,
-          fit: BoxFit.cover,
-          placeholder: (_, __) => Container(
-              width: 200,
-              height: 160,
-              color: AppColors.bg,
-              child: const Center(child: CircularProgressIndicator())),
-        ),
-      ),
-    );
-  }
-
-  void _showFullImage(BuildContext context) {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => Scaffold(
-        backgroundColor: Colors.black,
-        appBar: AppBar(
-            backgroundColor: Colors.transparent,
-            iconTheme: const IconThemeData(color: Colors.white)),
-        body: Center(
-            child: InteractiveViewer(
-                child: CachedNetworkImage(
-                    imageUrl: imageUrl, fit: BoxFit.contain))),
-      ),
-      fullscreenDialog: true,
-    ));
-  }
-}
-
-// ─── DATE DIVIDER ────────────────────────────────────────────────────────
-class _DateDivider extends StatelessWidget {
-  final DateTime date;
-  const _DateDivider({required this.date});
-
-  @override
-  Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final isToday =
-        date.year == now.year && date.month == now.month && date.day == now.day;
-    final isYesterday = date.year == now.year &&
-        date.month == now.month &&
-        date.day == now.day - 1;
-    final months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec'
-    ];
-    final label = isToday
-        ? 'Today'
-        : isYesterday
-            ? 'Yesterday'
-            : '${date.day} ${months[date.month - 1]} ${date.year}';
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(children: [
-        const Expanded(child: Divider()),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Text(label,
-              style: const TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.text3)),
-        ),
-        const Expanded(child: Divider()),
-      ]),
-    );
-  }
-}
-
-// ─── EMPTY PLACEHOLDER ───────────────────────────────────────────────────
-class _EmptyChatPlaceholder extends StatelessWidget {
-  const _EmptyChatPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Container(
-          width: 80,
-          height: 80,
-          decoration: const BoxDecoration(
-              color: AppColors.primaryPale, shape: BoxShape.circle),
-          child: const Icon(Icons.chat_bubble_outline_rounded,
-              size: 36, color: AppColors.primary),
-        ),
-        const SizedBox(height: 16),
-        Text('Start the conversation',
-            style: Theme.of(context).textTheme.headlineSmall),
-        const SizedBox(height: 6),
-        const Text('Say hello and ask about the property',
-            style: TextStyle(fontSize: 13, color: AppColors.text3)),
-      ]),
-    );
-  }
-}
-
-// ─── CHAT INPUT BAR ──────────────────────────────────────────────────────
-class _ChatInputBar extends StatelessWidget {
-  final TextEditingController controller;
-  final bool hasText, sending, sendingImage;
-  final VoidCallback onSend, onImagePick;
-  const _ChatInputBar(
-      {required this.controller,
-      required this.hasText,
-      required this.sending,
-      required this.sendingImage,
-      required this.onSend,
-      required this.onImagePick});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.fromLTRB(
-          10, 8, 10, MediaQuery.of(context).padding.bottom + 8),
-      decoration: const BoxDecoration(
-        color: AppColors.surface,
-        border: Border(top: BorderSide(color: AppColors.border, width: 0.5)),
-      ),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-        // Attach image
-        GestureDetector(
-          onTap: sendingImage ? null : onImagePick,
-          child: Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-                color: AppColors.bg,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.border)),
-            child: sendingImage
-                ? const Center(
-                    child: SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2)))
-                : const Icon(Icons.attach_file_rounded,
-                    size: 18, color: AppColors.text2),
-          ),
-        ),
-        const SizedBox(width: 8),
-        // Text input
-        Expanded(
-          child: Container(
-            constraints: const BoxConstraints(maxHeight: 110),
-            decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: AppColors.border2),
-            ),
-            child: TextField(
-              controller: controller,
-              maxLines: null,
-              textCapitalization: TextCapitalization.sentences,
-              style: const TextStyle(fontSize: 13),
-              decoration: const InputDecoration(
-                hintText: 'Type a message…',
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                filled: false,
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        // Send button — was a bare GestureDetector with zero tap
-        // feedback (the AnimatedContainer only reacts to hasText, not to
-        // the actual press). Material+InkWell gives a real ripple on tap
-        // with no new state needed.
-        Material(
-          color: Colors.transparent,
-          shape: const CircleBorder(),
-          child: InkWell(
-            onTap: (sending || !hasText) ? null : onSend,
-            customBorder: const CircleBorder(),
-            child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: hasText ? AppColors.primary : AppColors.bg,
-              shape: BoxShape.circle,
-              border: Border.all(
-                  color: hasText ? AppColors.primary : AppColors.border),
-            ),
-            child: sending
-                ? const Center(
-                    child: SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white)))
-                : Icon(Icons.send_rounded,
-                    size: 17, color: hasText ? Colors.white : AppColors.text3),
-          ),
-        ),
-        ),
-      ]),
     );
   }
 }

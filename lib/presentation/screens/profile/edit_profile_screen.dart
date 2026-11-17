@@ -1,264 +1,142 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
-import 'dart:io';
 import '../../../core/constants/app_theme.dart';
+import '../../../core/widgets/common_widgets.dart';
 import '../../providers/app_providers.dart';
 
 class EditProfileScreen extends ConsumerStatefulWidget {
   const EditProfileScreen({super.key});
   @override
-  ConsumerState<EditProfileScreen> createState() => _EditProfileScreenState();
+  ConsumerState<EditProfileScreen> createState() => _EditProfileState();
 }
 
-class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
-  final _nameCtrl = TextEditingController();
-  final _emailCtrl = TextEditingController();
-  final _bioCtrl = TextEditingController();
-  final _agencyCtrl = TextEditingController();
-  XFile? _avatarXFile;
-  bool _loading = false;
-  bool _init = false;
+class _EditProfileState extends ConsumerState<EditProfileScreen> {
+  final _name = TextEditingController();
+  final _email = TextEditingController();
+  final _agency = TextEditingController();
+  final _bio = TextEditingController();
+  String _city = 'Abuja';
+  String _role = 'tenant';
+  XFile? _photo;
+  bool _loaded = false, _busy = false;
+  String? _error;
 
   @override
   void dispose() {
-    _nameCtrl.dispose();
-    _emailCtrl.dispose();
-    _bioCtrl.dispose();
-    _agencyCtrl.dispose();
+    for (final c in [_name, _email, _agency, _bio]) { c.dispose(); }
     super.dispose();
   }
 
-  void _initFrom(dynamic user) {
-    if (_init) return;
-    _init = true;
-    _nameCtrl.text = user.name ?? '';
-    _emailCtrl.text = user.email ?? '';
-    _bioCtrl.text = user.bio ?? '';
-    _agencyCtrl.text = user.agencyName ?? '';
+  static String _roleName(String r) => r == 'agent' ? 'Agent' : r == 'landlord' ? 'Landlord' : 'Renter';
+
+  String _maskPhone(String p) {
+    if (p.length < 8) return p;
+    return '${p.substring(0, p.length - 7)} *** ${p.substring(p.length - 4)}';
   }
 
-  Future<void> _pickAvatar() async {
-    final picker = ImagePicker();
-    final picked = await picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 75,
+  Future<void> _pickPhoto() async {
+    final x = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 1200, imageQuality: 85);
+    if (x != null) setState(() => _photo = x);
+  }
+
+  Future<void> _changeRole() async {
+    final r = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.card,
+      builder: (c) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const SizedBox(height: 12),
+        Text('Account type', style: AppText.h3),
+        for (final r in const ['tenant', 'agent', 'landlord']) ListTile(title: Text(_roleName(r)), trailing: _role == r ? const Icon(Icons.check_rounded, color: AppColors.primary) : null, onTap: () => Navigator.pop(c, r)),
+        const SizedBox(height: 8),
+      ])),
     );
-    if (picked != null) setState(() => _avatarXFile = picked);
+    if (r != null) setState(() => _role = r);
   }
 
-  Future<void> _save(dynamic user) async {
-    if (_nameCtrl.text.trim().isEmpty) return;
-    setState(() => _loading = true);
-    await ref.read(authServiceProvider).updateUserProfile(
-          uid: user.uid,
-          name: _nameCtrl.text.trim(),
-          email: _emailCtrl.text.trim(),
-          bio: _bioCtrl.text.trim(),
-          agencyName: _agencyCtrl.text.trim(),
-          avatarXFile: _avatarXFile,
-        );
-    if (mounted) {
+  Future<void> _save() async {
+    final uid = ref.read(currentUserIdProvider);
+    if (uid == null) return;
+    if (_name.text.trim().length < 2) { setState(() => _error = 'Enter your full name.'); return; }
+    setState(() { _busy = true; _error = null; });
+    try {
+      await ref.read(authServiceProvider).updateUserProfile(
+            uid: uid,
+            name: _name.text.trim(),
+            email: _email.text.trim(),
+            bio: _bio.text.trim(),
+            agencyName: _agency.text.trim(),
+            city: _city,
+            role: _role,
+            avatarXFile: _photo,
+          );
+      if (!mounted) return;
+      showPsSnack(context, 'Profile saved');
       context.pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profile updated successfully!')));
+    } catch (_) {
+      if (mounted) setState(() { _busy = false; _error = 'We could not save your changes. Check your connection and try again.'; });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final userAsync = ref.watch(currentUserModelProvider);
-
+    final user = ref.watch(currentUserModelProvider).asData?.value;
+    if (user != null && !_loaded) {
+      _loaded = true;
+      _name.text = user.name;
+      _email.text = user.email ?? '';
+      _agency.text = user.agencyName ?? '';
+      _bio.text = user.bio ?? '';
+      _role = ['tenant', 'agent', 'landlord'].contains(user.role) ? user.role : 'tenant';
+    }
+    final isPro = _role != 'tenant';
     return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(
-        title: Text('Edit Profile',
-            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
-        actions: [
-          userAsync.whenOrNull(
-                  data: (user) => TextButton(
-                        onPressed: _loading ? null : () => _save(user),
-                        child: _loading
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2))
-                            : Text('Save',
-                                style: GoogleFonts.plusJakartaSans(
-                                    fontWeight: FontWeight.w800,
-                                    color: AppColors.primary,
-                                    fontSize: 14)),
-                      )) ??
-              const SizedBox.shrink(),
-          const SizedBox(width: 8),
-        ],
-      ),
-      body: userAsync.when(
-        data: (user) {
-          if (user == null) return const Center(child: Text('User not found'));
-          _initFrom(user);
-          final isAgent = user.role == 'agent' || user.role == 'landlord';
-
-          return ListView(padding: const EdgeInsets.all(20), children: [
-            Center(
-              child: GestureDetector(
-                onTap: _pickAvatar,
-                child: Stack(children: [
-                  CircleAvatar(
-                    radius: 52,
-                    backgroundColor: AppColors.primaryPale2,
-                    backgroundImage: _avatarXFile != null
-                        ? FileImage(File(_avatarXFile!.path)) as ImageProvider
-                        : (user.profilePhoto != null &&
-                                user.profilePhoto!.isNotEmpty
-                            ? NetworkImage(user.profilePhoto!)
-                            : null),
-                    child: _avatarXFile == null &&
-                            (user.profilePhoto == null ||
-                                user.profilePhoto!.isEmpty)
-                        ? Text(
-                            user.name.isNotEmpty
-                                ? user.name[0].toUpperCase()
-                                : '?',
-                            style: const TextStyle(
-                                color: AppColors.primary,
-                                fontSize: 38,
-                                fontWeight: FontWeight.w800))
-                        : null,
-                  ),
-                  Positioned(
-                      bottom: 3,
-                      right: 3,
-                      child: Container(
-                          width: 30,
-                          height: 30,
-                          decoration: const BoxDecoration(
-                              color: AppColors.primary, shape: BoxShape.circle),
-                          child: const Icon(Icons.camera_alt_rounded,
-                              color: Colors.white, size: 15))),
+      backgroundColor: AppColors.surface,
+      appBar: const PsTopBar(title: 'Edit profile'),
+      body: user == null
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(padding: kPagePadding, children: [
+              Center(child: Column(children: [
+                Stack(clipBehavior: Clip.none, children: [
+                  _photo != null
+                      ? CircleAvatar(radius: 56, backgroundImage: FileImage(File(_photo!.path)))
+                      : PsAvatar(url: user.profilePhoto, name: user.name, size: 112),
+                  Positioned(right: -2, bottom: -2, child: Semantics(button: true, label: 'Change photo', child: InkWell(onTap: _pickPhoto, customBorder: const CircleBorder(), child: Container(width: 44, height: 44, decoration: BoxDecoration(color: AppColors.primary, shape: BoxShape.circle, border: Border.all(color: AppColors.surface, width: 3)), child: const Icon(Icons.photo_camera_outlined, color: Colors.white, size: 20))))),
                 ]),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Center(
-                child: Text('Tap to change photo',
-                    style:
-                        const TextStyle(fontSize: 12, color: AppColors.text3))),
-            const SizedBox(height: 28),
-            _SectLabel('FULL NAME*'),
-            _Field(
-                ctrl: _nameCtrl,
-                icon: Icons.person_outline,
-                hint: 'Your full name'),
-            const SizedBox(height: 14),
-            _SectLabel('EMAIL'),
-            _Field(
-                ctrl: _emailCtrl,
-                icon: Icons.email_outlined,
-                hint: 'your@email.com',
-                type: TextInputType.emailAddress),
-            const SizedBox(height: 14),
-            _SectLabel('BIO'),
-            _Field(
-                ctrl: _bioCtrl,
-                icon: Icons.info_outline,
-                hint: 'Tell people about yourself…',
-                maxLines: 3,
-                maxLength: 300),
-            const SizedBox(height: 14),
-            if (isAgent) ...[
-              _SectLabel('AGENCY / COMPANY NAME'),
-              _Field(
-                  ctrl: _agencyCtrl,
-                  icon: Icons.business_outlined,
-                  hint: 'e.g. Propsure Realty Ltd'),
-              const SizedBox(height: 14),
-            ],
-            const SizedBox(height: 10),
-            SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton(
-                  onPressed: _loading ? null : () => _save(user),
-                  child: _loading
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white))
-                      : Text('Save Changes',
-                          style: GoogleFonts.plusJakartaSans(
-                              fontWeight: FontWeight.w800, fontSize: 15)),
-                )),
-          ]);
-        },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, __) => const Center(child: Text('Could not load profile')),
-      ),
+                const SizedBox(height: 8),
+                PsLink('Change photo', onTap: _pickPhoto, underline: false),
+              ])),
+              const SizedBox(height: 16),
+              PsField(label: 'Full name', controller: _name, textInputAction: TextInputAction.next),
+              const SizedBox(height: 12),
+              PsField(label: 'Email', controller: _email, keyboardType: TextInputType.emailAddress, textInputAction: TextInputAction.next),
+              const SizedBox(height: 12),
+              PsCard(child: Row(children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Phone', style: AppText.small), const SizedBox(height: 2), Text(_maskPhone(user.phone), style: AppText.title)])),
+                if (user.isPhoneVerified) const PsPill('Confirmed', icon: Icons.check_circle_rounded, tone: PsTone.success),
+              ])),
+              const SizedBox(height: 12),
+              PsDropdown<String>(label: 'City', value: _city, items: const ['Abuja'], itemLabel: (s) => s, onChanged: (v) => setState(() => _city = v ?? 'Abuja')),
+              const SizedBox(height: 8),
+              const PsNote('Your contact details are not shown publicly by default.', icon: Icons.info_outline_rounded),
+              if (isPro) ...[
+                const SizedBox(height: 12),
+                PsField(label: 'Agency or business name (optional)', controller: _agency),
+                const SizedBox(height: 12),
+                PsField(label: 'About you', controller: _bio, maxLines: 4, maxLength: 300),
+              ],
+              const SizedBox(height: 12),
+              PsCard(onTap: _changeRole, semanticLabel: 'Change account type', child: Row(children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Account type', style: AppText.small), const SizedBox(height: 2), Text(_roleName(_role), style: AppText.h3)])),
+                PsLink('Change', chevron: true, onTap: _changeRole, underline: false),
+              ])),
+              if (_error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(_error!, style: AppText.small.copyWith(color: AppColors.error, fontWeight: FontWeight.w600))),
+              const SizedBox(height: 16),
+              PsButton('Save changes', loading: _busy, onPressed: _save),
+              const SizedBox(height: 24),
+            ]),
     );
   }
-}
-
-class _SectLabel extends StatelessWidget {
-  final String text;
-  const _SectLabel(this.text);
-  @override
-  Widget build(BuildContext context) => Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Text(text,
-          style: const TextStyle(
-              fontSize: 9,
-              fontWeight: FontWeight.w800,
-              color: AppColors.text3,
-              letterSpacing: 0.6)));
-}
-
-class _Field extends StatelessWidget {
-  final TextEditingController ctrl;
-  final IconData icon;
-  final String hint;
-  final int maxLines;
-  final int? maxLength;
-  final TextInputType? type;
-  const _Field(
-      {required this.ctrl,
-      required this.icon,
-      required this.hint,
-      this.maxLines = 1,
-      this.maxLength,
-      this.type});
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 2),
-        decoration: BoxDecoration(
-            color: AppColors.bg,
-            border: Border.all(color: AppColors.border),
-            borderRadius: BorderRadius.circular(12)),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Padding(
-              padding: const EdgeInsets.only(top: 14),
-              child: Icon(icon, size: 18, color: AppColors.text2)),
-          const SizedBox(width: 10),
-          Expanded(
-              child: TextField(
-            controller: ctrl,
-            maxLines: maxLines,
-            maxLength: maxLength,
-            keyboardType: type,
-            textCapitalization: TextCapitalization.words,
-            decoration: InputDecoration(
-              hintText: hint,
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              filled: false,
-              fillColor: Colors.transparent,
-            ),
-            style: const TextStyle(fontSize: 13),
-          )),
-        ]),
-      );
 }

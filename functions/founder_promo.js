@@ -1,92 +1,65 @@
 /**
- * Founder Promo — "first 100 agents get premium free."
+ * Founder programme — "first N agents get Pro access".
  *
- * Design choices worth knowing:
- * - The slot count lives in ONE document (`promotions/founderProgram`) and
- *   is incremented inside a Firestore transaction — that's what makes
- *   this race-safe. Without a transaction, two agents claiming the last
- *   slot at the same millisecond could both succeed, blowing past 100.
- * - Grants a real `premiumPlan`/`premiumExpiresAt` on the user doc —
- *   the SAME fields Paystack's webhook sets on a real payment. That
- *   means every screen that already reads `user.isPremium` (or your
- *   `effectiveIsPremiumProvider`) just works, with zero UI changes.
- * - Duration is 12 months, not permanent — a "first 100 users" reward is
- *   usually meant to be generous, not an unlimited standing commitment
- *   with no way to revisit it. Change FOUNDER_GRANT_DAYS below if you
- *   want it shorter/longer/permanent (set to something absurd like
- *   36500 for "effectively forever" rather than writing separate
- *   permanent-grant logic).
- * - A user can only claim once (checked via a `claimedBy` array on the
- *   promo doc, and a `founderPromoClaimed` flag on the user doc) — so
- *   they can't re-run this to keep extending their own free period.
+ * DISABLED BY DEFAULT (FOUNDER_PROMO_ENABLED=false). Do not advertise a free
+ * period or a cap in the app until you have enabled and tested this.
  *
- * Add this to your existing functions/index.js (alongside the Phase 1
- * PLAN_CATALOG, admin.initializeApp(), etc. — don't call
- * admin.initializeApp() twice in one file).
+ * Fixes over the previous file:
+ *  - it now imports its own dependencies (it used undefined `functions`,
+ *    `db` and `admin` before) and is wired into index.js
+ *  - the one-claim-per-user check happens INSIDE the transaction, using a
+ *    unique claim document keyed by uid, so concurrent duplicate claims can
+ *    never both succeed
+ *  - the slot count and the claim are written in the same transaction, so
+ *    the cap cannot be exceeded
  */
+const functions = require('firebase-functions/v1');
+const { db, FieldValue, Timestamp, DAY_MS } = require('./lib/admin');
+const { FOUNDER } = require('./lib/config');
 
-const FOUNDER_GRANT_DAYS = 365;
-const FOUNDER_PROGRAM_DOC = 'founderProgram';
-const FOUNDER_SLOTS_TOTAL = 100;
+const PROGRAM = db.collection('promotions').doc('founderProgram');
 
 exports.claimFounderPromo = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError('unauthenticated', 'Please sign in first.');
-  }
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Please sign in first.');
+  if (!FOUNDER.enabled()) throw new functions.https.HttpsError('failed-precondition', 'This offer is not available.');
   const uid = context.auth.uid;
-
-  const userSnap = await db.collection('users').doc(uid).get();
-  if (!userSnap.exists) {
-    throw new functions.https.HttpsError('not-found', 'User profile not found.');
-  }
-  const user = userSnap.data();
-  if (!(user.role === 'agent' || user.role === 'landlord')) {
-    throw new functions.https.HttpsError(
-      'permission-denied',
-      'This offer is for agents and landlords listing property, not tenant accounts.'
-    );
-  }
-  if (user.founderPromoClaimed) {
-    throw new functions.https.HttpsError('already-exists', 'You\'ve already claimed this offer.');
-  }
-
-  const promoRef = db.collection('promotions').doc(FOUNDER_PROGRAM_DOC);
+  const claimRef = PROGRAM.collection('claims').doc(uid);
+  const userRef = db.collection('users').doc(uid);
 
   const result = await db.runTransaction(async (t) => {
-    const promoSnap = await t.get(promoRef);
-    const promo = promoSnap.exists ? promoSnap.data() : { slotsClaimed: 0 };
-
-    if ((promo.slotsClaimed || 0) >= FOUNDER_SLOTS_TOTAL) {
-      return { claimed: false, reason: 'full' };
+    const [programSnap, claimSnap, userSnap] = await Promise.all([t.get(PROGRAM), t.get(claimRef), t.get(userRef)]);
+    if (!userSnap.exists) throw new functions.https.HttpsError('not-found', 'User profile not found.');
+    const user = userSnap.data();
+    if (!['agent', 'landlord'].includes(user.role)) {
+      throw new functions.https.HttpsError('permission-denied', 'This offer is for agents and landlords who list property.');
     }
+    if (claimSnap.exists) throw new functions.https.HttpsError('already-exists', 'You have already claimed this offer.');
 
-    const expiresAt = new Date(Date.now() + FOUNDER_GRANT_DAYS * 24 * 60 * 60 * 1000);
+    const claimed = (programSnap.exists && programSnap.data().slotsClaimed) || 0;
+    const total = FOUNDER.slots();
+    if (claimed >= total) return { claimed: false };
 
-    t.set(promoRef, {
-      slotsClaimed: (promo.slotsClaimed || 0) + 1,
-      slotsTotal: FOUNDER_SLOTS_TOTAL,
-      active: (promo.slotsClaimed || 0) + 1 < FOUNDER_SLOTS_TOTAL,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    const days = FOUNDER.grantDays();
+    const currentEnd = user.premiumExpiresAt ? user.premiumExpiresAt.toMillis() : 0;
+    const expiresAt = Timestamp.fromMillis(Math.max(Date.now(), currentEnd) + days * DAY_MS);
+
+    t.set(PROGRAM, {
+      slotsClaimed: claimed + 1,
+      slotsTotal: total,
+      active: claimed + 1 < total,
+      updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
-
-    t.update(db.collection('users').doc(uid), {
+    t.set(claimRef, { uid, slotNumber: claimed + 1, claimedAt: FieldValue.serverTimestamp(), expiresAt });
+    t.update(userRef, {
       premiumPlan: 'agent_pro',
-      premiumStartedAt: admin.firestore.FieldValue.serverTimestamp(),
-      premiumExpiresAt: admin.firestore.Timestamp.fromDate(expiresAt),
+      premiumStartedAt: user.premiumStartedAt || FieldValue.serverTimestamp(),
+      premiumExpiresAt: expiresAt,
       founderPromoClaimed: true,
-      founderPromoClaimedAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
     });
-
-    return { claimed: true, slotNumber: (promo.slotsClaimed || 0) + 1, expiresAt: expiresAt.toISOString() };
+    return { claimed: true, slotNumber: claimed + 1, expiresAt: expiresAt.toDate().toISOString() };
   });
 
-  if (!result.claimed) {
-    throw new functions.https.HttpsError(
-      'resource-exhausted',
-      'All 100 founding agent spots have been claimed — regular pricing now applies.'
-    );
-  }
-
+  if (!result.claimed) throw new functions.https.HttpsError('resource-exhausted', 'All founding spots have been claimed.');
   return { success: true, slotNumber: result.slotNumber, expiresAt: result.expiresAt };
 });

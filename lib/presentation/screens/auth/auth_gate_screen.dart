@@ -2,978 +2,424 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../../../core/constants/app_theme.dart';
+import '../../../core/widgets/common_widgets.dart';
 import '../../providers/app_providers.dart';
-import '../../../services/auth_service.dart'; // AuthResult lives here
 
+enum _Step { method, code, setup, emailCreate, reset }
+
+/// Sign in / create account, with the phone-code and account-setup states
+/// from the mockups. Browsing never requires an account; [reason] explains
+/// why sign-in is being asked for ("Sign in to save this home").
 class AuthGateScreen extends ConsumerStatefulWidget {
   final String? redirectAfter;
-  const AuthGateScreen({super.key, this.redirectAfter});
+  final String? reason;
+  const AuthGateScreen({super.key, this.redirectAfter, this.reason});
 
   @override
   ConsumerState<AuthGateScreen> createState() => _AuthGateScreenState();
 }
 
-class _AuthGateScreenState extends ConsumerState<AuthGateScreen>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabCtrl;
-
-  // ── Phone state ────────────────────────────────────────────────────────────
-  final _phoneCtrl = TextEditingController();
-  final _otpCtrls  = List.generate(6, (_) => TextEditingController());
-  final _otpFocus  = List.generate(6, (_) => FocusNode());
-  bool    _otpSent        = false;
-  String? _verificationId;
-  int     _resendTimer    = 60;
-
-  // ── Email state ────────────────────────────────────────────────────────────
-  final _emailCtrl    = TextEditingController();
-  final _passwordCtrl = TextEditingController();
-  final _confirmCtrl  = TextEditingController();
-  bool _isRegister = false;
-  bool _pwVisible  = false;
-
-  // ── Shared ─────────────────────────────────────────────────────────────────
-  bool    _isLoading    = false;
-  bool    _needsProfile = false;
-  String? _error;
-
-  // ── Profile setup ──────────────────────────────────────────────────────────
-  final _nameCtrl = TextEditingController();
+class _AuthGateScreenState extends ConsumerState<AuthGateScreen> {
+  _Step _step = _Step.method;
+  int _method = 0; // 0 phone, 1 email
+  final _phone = TextEditingController();
+  final _email = TextEditingController();
+  final _password = TextEditingController();
+  final _name = TextEditingController();
+  final _city = TextEditingController(text: 'Abuja');
+  final _code = TextEditingController();
   String _role = 'tenant';
-
-  @override
-  void initState() {
-    super.initState();
-    _tabCtrl = TabController(length: 2, vsync: this);
-    _tabCtrl.addListener(() => setState(() => _error = null));
-  }
+  bool _alerts = false;
+  bool _busy = false;
+  String? _error;
+  String? _verificationId;
+  String _fullPhone = '';
+  int _resend = 0;
 
   @override
   void dispose() {
-    _tabCtrl.dispose();
-    _phoneCtrl.dispose();
-    _emailCtrl.dispose();
-    _passwordCtrl.dispose();
-    _confirmCtrl.dispose();
-    _nameCtrl.dispose();
-    for (final c in _otpCtrls) { c.dispose(); }
-    for (final f in _otpFocus)  { f.dispose(); }
+    for (final c in [_phone, _email, _password, _name, _city, _code]) {
+      c.dispose();
+    }
     super.dispose();
   }
 
-  // ── Phone auth ─────────────────────────────────────────────────────────────
-  Future<void> _sendOtp() async {
-    final raw = _phoneCtrl.text.trim().replaceAll(RegExp(r'[^0-9+]'), '');
-    final normalized = raw.startsWith('+234')
-        ? raw.substring(4)
-        : raw.startsWith('234')
-            ? raw.substring(3)
-            : raw;
-    if (normalized.length != 10 && normalized.length != 11) {
-      setState(() => _error = 'Enter a valid Nigerian phone number');
+  String get _contextLine {
+    switch (widget.reason) {
+      case 'save':
+        return 'Sign in to save this home.';
+      case 'list':
+        return 'Sign in to list your property.';
+      case 'message':
+        return 'Sign in to message the agent.';
+      default:
+        return 'Save homes and speak with agents.';
+    }
+  }
+
+  String _normalisePhone(String raw) {
+    var d = raw.replaceAll(RegExp(r'[^0-9]'), '');
+    if (d.startsWith('234')) d = d.substring(3);
+    if (d.startsWith('0')) d = d.substring(1);
+    return '+234$d';
+  }
+
+  String _masked(String p) => p.length > 8 ? '${p.substring(0, 8)} *** ${p.substring(p.length - 4)}' : p;
+
+  void _tick() async {
+    _resend = 30;
+    while (mounted && _resend > 0) {
+      await Future<void>.delayed(const Duration(seconds: 1));
+      if (!mounted) return;
+      setState(() => _resend--);
+    }
+  }
+
+  Future<void> _sendCode() async {
+    final digits = _phone.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length < 10) {
+      setState(() => _error = 'Enter your 10-digit Nigerian mobile number.');
       return;
     }
-    final local = normalized.startsWith('0') ? normalized.substring(1) : normalized;
-    if (local.length != 10) {
-      setState(() => _error = 'Enter a valid Nigerian phone number');
-      return;
-    }
-    setState(() { _isLoading = true; _error = null; });
-    final phone = '+234$local';
+    setState(() { _busy = true; _error = null; });
+    _fullPhone = _normalisePhone(_phone.text);
     await ref.read(authServiceProvider).sendOTP(
-      phoneNumber: phone,
-      onCodeSent: (vid) {
-        setState(() {
-          _verificationId = vid;
-          _otpSent  = true;
-          _isLoading = false;
-        });
-        _startTimer();
+      phoneNumber: _fullPhone,
+      onCodeSent: (id) {
+        if (!mounted) return;
+        setState(() { _verificationId = id; _step = _Step.code; _busy = false; _code.clear(); });
+        _tick();
       },
-      onError: (e) => setState(() { _error = e; _isLoading = false; }),
+      onError: (e) {
+        if (!mounted) return;
+        setState(() { _busy = false; _error = e; });
+      },
     );
   }
 
-  void _startTimer() {
-    _resendTimer = 60;
-    Future.doWhile(() async {
-      await Future.delayed(const Duration(seconds: 1));
-      if (!mounted) return false;
-      setState(() => _resendTimer--);
-      return _resendTimer > 0;
-    });
-  }
-
-  Future<void> _verifyOtp() async {
-    final otp = _otpCtrls.map((c) => c.text).join();
-    if (otp.length != 6) return;
-    setState(() { _isLoading = true; _error = null; });
-    final auth   = ref.read(authServiceProvider);
-    final result = await auth.verifyOTP(
-        verificationId: _verificationId!, otp: otp);
-    if (!mounted) return;
-    if (result.success) {
-      final exists = await auth.userProfileExists(result.uid!);
-      if (!exists) {
-        setState(() { _needsProfile = true; _isLoading = false; });
-      } else {
-        _finish();
-      }
-    } else {
-      setState(() { _error = result.error; _isLoading = false; });
-    }
-  }
-
-  // ── Email auth ─────────────────────────────────────────────────────────────
-  Future<void> _emailAuth() async {
-    final email = _emailCtrl.text.trim();
-    final pw    = _passwordCtrl.text;
-
-    if (email.isEmpty || !email.contains('@')) {
-      setState(() => _error = 'Enter a valid email address');
+  Future<void> _verifyCode() async {
+    if (_code.text.length != 6 || _verificationId == null) {
+      setState(() => _error = 'Enter the 6-digit code.');
       return;
     }
-    if (pw.length < 6) {
-      setState(() => _error = 'Password must be at least 6 characters');
-      return;
-    }
-    if (_isRegister && _confirmCtrl.text != pw) {
-      setState(() => _error = 'Passwords do not match');
-      return;
-    }
-
-    setState(() { _isLoading = true; _error = null; });
-
+    setState(() { _busy = true; _error = null; });
     final auth = ref.read(authServiceProvider);
-    final AuthResult result;
-
-    if (_isRegister) {
-      result = await auth.createAccountWithEmail(email: email, password: pw);
-    } else {
-      result = await auth.signInWithEmail(email: email, password: pw);
-    }
-
+    final r = await auth.verifyOTP(verificationId: _verificationId!, otp: _code.text);
     if (!mounted) return;
-    if (result.success) {
-      final exists = await auth.userProfileExists(result.uid!);
-      if (!exists) {
-        setState(() { _needsProfile = true; _isLoading = false; });
-      } else {
-        _finish();
-      }
-    } else {
-      setState(() { _error = result.error; _isLoading = false; });
-    }
-  }
-
-  Future<void> _forgotPassword() async {
-    final email = _emailCtrl.text.trim();
-    if (email.isEmpty || !email.contains('@')) {
-      setState(() =>
-          _error = 'Enter your email first, then tap Forgot Password');
+    if (!r.success) {
+      setState(() { _busy = false; _error = r.error; });
       return;
     }
-    setState(() { _isLoading = true; _error = null; });
-    await ref.read(authServiceProvider).sendPasswordReset(email: email);
+    await _afterSignIn(r.uid!);
+  }
+
+  Future<void> _emailSubmit({required bool create}) async {
+    if (!_email.text.contains('@') || _password.text.length < 8) {
+      setState(() => _error = 'Enter a valid email and a password of at least 8 characters.');
+      return;
+    }
+    setState(() { _busy = true; _error = null; });
+    final auth = ref.read(authServiceProvider);
+    final r = create
+        ? await auth.createAccountWithEmail(email: _email.text, password: _password.text)
+        : await auth.signInWithEmail(email: _email.text, password: _password.text);
     if (!mounted) return;
-    setState(() => _isLoading = false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('Password reset email sent to $email'),
-      backgroundColor: AppColors.success,
-      behavior: SnackBarBehavior.floating,
-    ));
+    if (!r.success) {
+      setState(() { _busy = false; _error = r.error; });
+      return;
+    }
+    await _afterSignIn(r.uid!);
   }
 
-  // ── Profile setup ──────────────────────────────────────────────────────────
-  Future<void> _saveProfile() async {
-    if (_nameCtrl.text.trim().isEmpty) return;
-    setState(() => _isLoading = true);
-    final uid = ref.read(currentUserIdProvider);
-    if (uid == null) return;
-    await ref.read(authServiceProvider).createUserProfile(
-        uid: uid, name: _nameCtrl.text.trim(), role: _role);
-    if (mounted) _finish();
-  }
-
-  void _finish() {
-    final r = widget.redirectAfter;
-    if (r != null && r.isNotEmpty) {
-      context.go(r);
+  Future<void> _afterSignIn(String uid) async {
+    final exists = await ref.read(authServiceProvider).userProfileExists(uid);
+    if (!mounted) return;
+    if (exists) {
+      _done();
     } else {
-      context.go('/home');
+      setState(() { _busy = false; _step = _Step.setup; });
     }
   }
 
-  // ── Build ──────────────────────────────────────────────────────────────────
+  Future<void> _finishSetup() async {
+    if (_name.text.trim().length < 2) {
+      setState(() => _error = 'Please enter your name.');
+      return;
+    }
+    setState(() { _busy = true; _error = null; });
+    try {
+      final uid = ref.read(authServiceProvider).currentUser!.uid;
+      await ref.read(authServiceProvider).createUserProfile(uid: uid, name: _name.text.trim(), role: _role);
+      if (mounted) _done();
+    } catch (_) {
+      if (mounted) setState(() { _busy = false; _error = 'We could not save your details. Check your connection and try again.'; });
+    }
+  }
+
+  void _done() {
+    final to = widget.redirectAfter;
+    context.go(to != null && to.isNotEmpty ? to : (_role == 'tenant' ? '/home' : '/workspace'));
+  }
+
   @override
   Widget build(BuildContext context) {
+    switch (_step) {
+      case _Step.code:
+        return _codeView();
+      case _Step.setup:
+        return _setupView();
+      case _Step.reset:
+        return _resetView();
+      default:
+        return _methodView();
+    }
+  }
+
+  Widget _errorLine() => _error == null
+      ? const SizedBox.shrink()
+      : Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Semantics(liveRegion: true, child: Text(_error!, style: AppText.small.copyWith(color: AppColors.error, fontWeight: FontWeight.w600))),
+        );
+
+  Widget _legal() => Padding(
+        padding: const EdgeInsets.only(top: 16),
+        child: Wrap(alignment: WrapAlignment.center, crossAxisAlignment: WrapCrossAlignment.center, children: [
+          Text('By continuing you agree to the ', style: AppText.caption),
+          PsLink('Terms', onTap: () => context.push('/legal/terms'), underline: true),
+          Text(' and ', style: AppText.caption),
+          PsLink('Privacy Policy', onTap: () => context.push('/legal/privacy'), underline: true),
+        ]),
+      );
+
+  Widget _methodView() {
+    final creating = _step == _Step.emailCreate;
     return Scaffold(
       backgroundColor: AppColors.surface,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.close_rounded),
-          onPressed: () =>
-              context.canPop() ? context.pop() : context.go('/home'),
+      body: ListView(padding: EdgeInsets.zero, children: [
+        PsGreenHeader(
+          padding: const EdgeInsets.fromLTRB(12, 0, 24, 40),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            PsTopBar(dark: true, onBack: () => context.canPop() ? context.pop() : context.go('/home')),
+            const Padding(padding: EdgeInsets.only(left: 12, top: 4), child: PropsureLogo(light: true, size: 32)),
+          ]),
         ),
-      ),
+        Padding(
+          padding: kPagePadding,
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const SizedBox(height: 28),
+            Text(creating ? 'Create account' : 'Welcome back', textAlign: TextAlign.center, style: AppText.display.copyWith(color: AppColors.primary)),
+            const SizedBox(height: 8),
+            Text(_contextLine, textAlign: TextAlign.center, style: AppText.bodyMuted),
+            const SizedBox(height: 24),
+            if (!creating) PsSegmented(labels: const ['Phone', 'Email'], index: _method, onChanged: (i) => setState(() { _method = i; _error = null; })),
+            const SizedBox(height: 20),
+            if (_method == 0 && !creating) ...[
+              PsField(
+                label: 'Phone number',
+                controller: _phone,
+                keyboardType: TextInputType.phone,
+                hint: '812 345 6789',
+                autofillHints: const [AutofillHints.telephoneNumberNational],
+                formatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9 ]')), LengthLimitingTextInputFormatter(13)],
+                prefix: const Padding(padding: EdgeInsets.only(left: 14, right: 8), child: Center(widthFactor: 1, child: Text('🇳🇬  +234', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)))),
+                helper: 'Used for account security. Marketing is optional.',
+              ),
+              _errorLine(),
+              const SizedBox(height: 16),
+              PsButton('Send verification code', trailingIcon: Icons.arrow_forward_rounded, loading: _busy, onPressed: _sendCode),
+              const SizedBox(height: 16),
+              const Row(children: [Expanded(child: Divider()), Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('or')), Expanded(child: Divider())]),
+              const SizedBox(height: 16),
+              PsButton('Continue with email', kind: PsButtonKind.outline, icon: Icons.mail_outline_rounded, onPressed: () => setState(() { _method = 1; _error = null; })),
+            ] else ...[
+              PsField(label: 'Email', controller: _email, keyboardType: TextInputType.emailAddress, hint: 'you@example.com', autofillHints: const [AutofillHints.email]),
+              const SizedBox(height: 16),
+              PsField(label: 'Password', controller: _password, obscure: true, hint: 'At least 8 characters', autofillHints: const [AutofillHints.password]),
+              _errorLine(),
+              const SizedBox(height: 16),
+              PsButton(creating ? 'Create account' : 'Sign in', loading: _busy, onPressed: () => _emailSubmit(create: creating)),
+              if (!creating) Align(alignment: Alignment.centerRight, child: PsLink('Forgot password?', onTap: () => setState(() { _step = _Step.reset; _error = null; }))),
+            ],
+            const SizedBox(height: 16),
+            Center(
+              child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, children: [
+                Text(creating ? 'Already registered? ' : 'New here? ', style: AppText.small),
+                PsLink(creating ? 'Sign in' : 'Create account', underline: false, onTap: () => setState(() { _step = creating ? _Step.method : _Step.emailCreate; _method = 1; _error = null; })),
+              ]),
+            ),
+            Center(child: PsLink('Continue browsing', chevron: true, underline: false, onTap: () => context.go('/home'))),
+            _legal(),
+            const SizedBox(height: 24),
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  Widget _codeView() {
+    return Scaffold(
+      backgroundColor: AppColors.primary,
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
+        child: ListView(padding: const EdgeInsets.fromLTRB(12, 0, 12, 24), children: [
+          PsTopBar(dark: true, onBack: () => setState(() { _step = _Step.method; _error = null; })),
+          Container(
+            margin: const EdgeInsets.only(top: 8),
             padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 280),
-                child: _needsProfile
-                    ? _ProfileStep(
-                        key: const ValueKey('profile'),
-                        nameCtrl: _nameCtrl,
-                        role: _role,
-                        onRoleChanged: (r) => setState(() => _role = r),
-                        onSubmit: _saveProfile,
-                        isLoading: _isLoading,
-                      )
-                    : _otpSent
-                        ? _OtpStep(
-                            key: const ValueKey('otp'),
-                            phone: _phoneCtrl.text,
-                            ctrls: _otpCtrls,
-                            focusNodes: _otpFocus,
-                            onChanged: (v, i) {
-                              if (v.isNotEmpty && i < 5) {
-                                _otpFocus[i + 1].requestFocus();
-                              }
-                              if (v.isEmpty && i > 0) {
-                                _otpFocus[i - 1].requestFocus();
-                              }
-                              if (i == 5 && v.isNotEmpty) _verifyOtp();
-                            },
-                            onVerify: _verifyOtp,
-                            onResend: _sendOtp,
-                            resendTimer: _resendTimer,
-                            onChangeNumber: () =>
-                                setState(() => _otpSent = false),
-                            isLoading: _isLoading,
-                            error: _error,
-                          )
-                        : _MainAuthView(
-                            key: const ValueKey('main'),
-                            tabCtrl: _tabCtrl,
-                            phoneCtrl: _phoneCtrl,
-                            onSendOtp: _sendOtp,
-                            emailCtrl: _emailCtrl,
-                            passwordCtrl: _passwordCtrl,
-                            confirmCtrl: _confirmCtrl,
-                            isRegister: _isRegister,
-                            pwVisible: _pwVisible,
-                            onToggleRegister: () => setState(() {
-                              _isRegister = !_isRegister;
-                              _error = null;
-                            }),
-                            onTogglePwVisible: () =>
-                                setState(() => _pwVisible = !_pwVisible),
-                            onEmailAuth: _emailAuth,
-                            onForgotPassword: _forgotPassword,
-                            isLoading: _isLoading,
-                            error: _error,
-                            redirectHint: widget.redirectAfter,
-                          ),
+            decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(AppRadius.xl)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Icon(Icons.shield_outlined, size: 34, color: AppColors.primary),
+              const SizedBox(height: 12),
+              Text('Check your messages', style: AppText.h1),
+              const SizedBox(height: 8),
+              Text('Enter the code sent to ${_masked(_fullPhone)}', style: AppText.bodyMuted),
+              PsLink('Change number', onTap: () => setState(() { _step = _Step.method; _error = null; })),
+              const SizedBox(height: 16),
+              _CodeBoxes(controller: _code, onComplete: _verifyCode),
+              _errorLine(),
+              const SizedBox(height: 20),
+              PsButton('Verify & continue', loading: _busy, onPressed: _verifyCode),
+              const SizedBox(height: 8),
+              Center(
+                child: _resend > 0
+                    ? Padding(padding: const EdgeInsets.symmetric(vertical: 14), child: Text('Resend code in ${_resend}s', style: AppText.small))
+                    : PsLink('Resend code', onTap: _sendCode),
               ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── MAIN AUTH VIEW ───────────────────────────────────────────────────────────
-class _MainAuthView extends StatelessWidget {
-  final TabController tabCtrl;
-  final TextEditingController phoneCtrl;
-  final VoidCallback onSendOtp;
-  final TextEditingController emailCtrl;
-  final TextEditingController passwordCtrl;
-  final TextEditingController confirmCtrl;
-  final bool isRegister;
-  final bool pwVisible;
-  final VoidCallback onToggleRegister;
-  final VoidCallback onTogglePwVisible;
-  final VoidCallback onEmailAuth;
-  final VoidCallback onForgotPassword;
-  final bool isLoading;
-  final String? error;
-  final String? redirectHint;
-
-  const _MainAuthView({
-    super.key,
-    required this.tabCtrl,
-    required this.phoneCtrl,
-    required this.onSendOtp,
-    required this.emailCtrl,
-    required this.passwordCtrl,
-    required this.confirmCtrl,
-    required this.isRegister,
-    required this.pwVisible,
-    required this.onToggleRegister,
-    required this.onTogglePwVisible,
-    required this.onEmailAuth,
-    required this.onForgotPassword,
-    required this.isLoading,
-    this.error,
-    this.redirectHint,
-  });
-
-  String get _title {
-    if (redirectHint?.contains('post') == true)    return 'Sign in to\nlist a property';
-    if (redirectHint?.contains('chat') == true)    return 'Sign in to\nchat with agent';
-    if (redirectHint?.contains('booking') == true) return 'Sign in to\nbook a tour';
-    return 'Sign in or\ncreate account';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Logo row
-        Row(children: [
-          Container(
-            width: 38, height: 38,
-            decoration: BoxDecoration(
-              color: AppColors.primary,
-              borderRadius: BorderRadius.circular(9),
-            ),
-            child: const Center(
-                child: Text('🏡', style: TextStyle(fontSize: 20))),
-          ),
-          const SizedBox(width: 10),
-          Text('Propsure',
-              style: GoogleFonts.plusJakartaSans(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.primary)),
-        ]),
-        const SizedBox(height: 28),
-        Text(_title,
-            style: Theme.of(context)
-                .textTheme
-                .headlineLarge
-                ?.copyWith(height: 1.2)),
-        const SizedBox(height: 8),
-        Text('No password needed for phone. Or use email & password.',
-            style: Theme.of(context).textTheme.bodyMedium),
-        const SizedBox(height: 20),
-
-        // Tab bar
-        Container(
-          decoration: BoxDecoration(
-            color: AppColors.bg,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          padding: const EdgeInsets.all(4),
-          child: TabBar(
-            controller: tabCtrl,
-            indicator: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(9),
-              boxShadow: AppShadows.sm,
-            ),
-            indicatorSize: TabBarIndicatorSize.tab,
-            dividerColor: Colors.transparent,
-            labelColor: AppColors.primary,
-            unselectedLabelColor: AppColors.text3,
-            labelStyle:
-                GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w700),
-            unselectedLabelStyle:
-                GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w500),
-            tabs: const [
-              Tab(icon: Icon(Icons.phone_outlined, size: 16), text: 'Phone'),
-              Tab(icon: Icon(Icons.email_outlined,  size: 16), text: 'Email'),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-
-        // Tab content
-        SizedBox(
-          height: isRegister ? 360 : 300,
-          child: TabBarView(
-            controller: tabCtrl,
-            children: [
-              _PhoneTabContent(
-                ctrl: phoneCtrl,
-                onSend: onSendOtp,
-                isLoading: isLoading,
-                error: tabCtrl.index == 0 ? error : null,
-              ),
-              _EmailTabContent(
-                emailCtrl: emailCtrl,
-                passwordCtrl: passwordCtrl,
-                confirmCtrl: confirmCtrl,
-                isRegister: isRegister,
-                pwVisible: pwVisible,
-                onToggleRegister: onToggleRegister,
-                onTogglePwVisible: onTogglePwVisible,
-                onSubmit: onEmailAuth,
-                onForgotPassword: onForgotPassword,
-                isLoading: isLoading,
-                error: tabCtrl.index == 1 ? error : null,
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        Center(
-          child: Text(
-            'By continuing you agree to our Terms & Privacy Policy',
-            style: Theme.of(context).textTheme.bodySmall,
-            textAlign: TextAlign.center,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ─── PHONE TAB ────────────────────────────────────────────────────────────────
-class _PhoneTabContent extends StatelessWidget {
-  final TextEditingController ctrl;
-  final VoidCallback onSend;
-  final bool isLoading;
-  final String? error;
-  const _PhoneTabContent({
-    required this.ctrl,
-    required this.onSend,
-    required this.isLoading,
-    this.error,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Container(
-        decoration: BoxDecoration(
-          color: AppColors.bg,
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Row(children: [
-          Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-            child: Text('+234',
-                style: GoogleFonts.plusJakartaSans(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14,
-                    color: AppColors.text)),
-          ),
-          Container(width: 1, height: 24, color: AppColors.border),
-          Expanded(
-            child: TextField(
-              controller: ctrl,
-              keyboardType: TextInputType.phone,
-              inputFormatters: [
-                FilteringTextInputFormatter.digitsOnly,
-                LengthLimitingTextInputFormatter(11),
-              ],
-              decoration: const InputDecoration(
-                border: InputBorder.none,
-                hintText: '0812 345 6789',
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                filled: false,
-              ),
-              style: GoogleFonts.plusJakartaSans(fontSize: 14, color: AppColors.text),
-            ),
+              const Divider(),
+              const SizedBox(height: 8),
+              Center(child: Text('Never share this code with an agent or anyone else.', textAlign: TextAlign.center, style: AppText.caption)),
+            ]),
           ),
         ]),
       ),
-      if (error != null) ...[const SizedBox(height: 10), _ErrorBox(error!)],
-      const SizedBox(height: 16),
-      SizedBox(
-        width: double.infinity,
-        height: 52,
-        child: ElevatedButton.icon(
-          onPressed: isLoading ? null : onSend,
-          icon: isLoading
-              ? const SizedBox(
-                  width: 18, height: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
-              : const Icon(Icons.sms_outlined, size: 18),
-          label: Text(isLoading ? 'Sending…' : 'Send Verification Code'),
-        ),
-      ),
-      const SizedBox(height: 12),
-      Row(children: [
-        const Icon(Icons.shield_outlined, size: 13, color: AppColors.text3),
-        const SizedBox(width: 5),
-        Text('Your number is never shared with third parties.',
-            style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppColors.text3)),
-      ]),
-    ]);
-  }
-}
-
-// ─── EMAIL TAB ────────────────────────────────────────────────────────────────
-class _EmailTabContent extends StatelessWidget {
-  final TextEditingController emailCtrl;
-  final TextEditingController passwordCtrl;
-  final TextEditingController confirmCtrl;
-  final bool isRegister;
-  final bool pwVisible;
-  final VoidCallback onToggleRegister;
-  final VoidCallback onTogglePwVisible;
-  final VoidCallback onSubmit;
-  final VoidCallback onForgotPassword;
-  final bool isLoading;
-  final String? error;
-
-  const _EmailTabContent({
-    required this.emailCtrl,
-    required this.passwordCtrl,
-    required this.confirmCtrl,
-    required this.isRegister,
-    required this.pwVisible,
-    required this.onToggleRegister,
-    required this.onTogglePwVisible,
-    required this.onSubmit,
-    required this.onForgotPassword,
-    required this.isLoading,
-    this.error,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // Toggle: Sign In / Create Account
-        Row(children: [
-          _AuthToggleChip(
-            label: 'Sign In',
-            selected: !isRegister,
-            onTap: isRegister ? onToggleRegister : null,
-          ),
-          const SizedBox(width: 8),
-          _AuthToggleChip(
-            label: 'Create Account',
-            selected: isRegister,
-            onTap: !isRegister ? onToggleRegister : null,
-          ),
-        ]),
-        const SizedBox(height: 14),
-
-        // Email
-        TextField(
-          controller: emailCtrl,
-          keyboardType: TextInputType.emailAddress,
-          textInputAction: TextInputAction.next,
-          decoration: const InputDecoration(
-            labelText: 'Email address',
-            hintText: 'you@example.com',
-            prefixIcon: Icon(Icons.email_outlined),
-          ),
-          style: GoogleFonts.plusJakartaSans(fontSize: 14, color: AppColors.text),
-        ),
-        const SizedBox(height: 10),
-
-        // Password
-        TextField(
-          controller: passwordCtrl,
-          obscureText: !pwVisible,
-          textInputAction:
-              isRegister ? TextInputAction.next : TextInputAction.done,
-          onSubmitted: isRegister ? null : (_) => onSubmit(),
-          decoration: InputDecoration(
-            labelText: 'Password',
-            hintText: isRegister ? 'Min. 6 characters' : '••••••••',
-            prefixIcon: const Icon(Icons.lock_outline_rounded),
-            suffixIcon: IconButton(
-              icon: Icon(pwVisible
-                  ? Icons.visibility_off_outlined
-                  : Icons.visibility_outlined),
-              onPressed: onTogglePwVisible,
-            ),
-          ),
-          style: GoogleFonts.plusJakartaSans(fontSize: 14, color: AppColors.text),
-        ),
-
-        // Confirm password
-        if (isRegister) ...[
-          const SizedBox(height: 10),
-          TextField(
-            controller: confirmCtrl,
-            obscureText: !pwVisible,
-            textInputAction: TextInputAction.done,
-            onSubmitted: (_) => onSubmit(),
-            decoration: const InputDecoration(
-              labelText: 'Confirm password',
-              hintText: 'Re-enter password',
-              prefixIcon: Icon(Icons.lock_outline_rounded),
-            ),
-            style: GoogleFonts.plusJakartaSans(fontSize: 14, color: AppColors.text),
-          ),
-        ],
-
-        if (error != null) ...[
-          const SizedBox(height: 10),
-          _ErrorBox(error!),
-        ],
-
-        const SizedBox(height: 16),
-
-        // Submit button
-        SizedBox(
-          width: double.infinity,
-          height: 52,
-          child: ElevatedButton(
-            onPressed: isLoading ? null : onSubmit,
-            child: isLoading
-                ? const SizedBox(
-                    width: 20, height: 20,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white))
-                : Text(isRegister ? 'Create Account →' : 'Sign In →'),
-          ),
-        ),
-
-        // Forgot password
-        if (!isRegister) ...[
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: onForgotPassword,
-              style: TextButton.styleFrom(padding: EdgeInsets.zero),
-              child: const Text('Forgot password?',
-                  style: TextStyle(
-                      fontSize: 12, color: AppColors.primary)),
-            ),
-          ),
-        ],
-      ]),
     );
   }
-}
 
-class _AuthToggleChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback? onTap;
-  const _AuthToggleChip(
-      {required this.label, required this.selected, this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.primary : AppColors.bg,
-          borderRadius: BorderRadius.circular(AppRadius.full),
-          border: Border.all(
-              color: selected
-                  ? AppColors.primary
-                  : AppColors.border),
-        ),
-        child: Text(label,
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 12,
-              fontWeight:
-                  selected ? FontWeight.w700 : FontWeight.w500,
-              color: selected ? Colors.white : AppColors.text2,
-            )),
-      ),
-    );
-  }
-}
-
-// ─── OTP STEP ─────────────────────────────────────────────────────────────────
-class _OtpStep extends StatelessWidget {
-  final String phone;
-  final List<TextEditingController> ctrls;
-  final List<FocusNode> focusNodes;
-  final void Function(String, int) onChanged;
-  final VoidCallback onVerify;
-  final VoidCallback onResend;
-  final int resendTimer;
-  final VoidCallback onChangeNumber;
-  final bool isLoading;
-  final String? error;
-
-  const _OtpStep({
-    super.key,
-    required this.phone,
-    required this.ctrls,
-    required this.focusNodes,
-    required this.onChanged,
-    required this.onVerify,
-    required this.onResend,
-    required this.resendTimer,
-    required this.onChangeNumber,
-    required this.isLoading,
-    this.error,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: AppColors.primaryPale,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.primaryPale2),
-        ),
-        child: Row(children: [
-          const Icon(Icons.sms_outlined,
-              color: AppColors.primary, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-              child: Text('Code sent to +234 $phone',
-                  style: GoogleFonts.plusJakartaSans(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12))),
-          GestureDetector(
-            onTap: onChangeNumber,
-            child: Text('Change',
-                style: GoogleFonts.plusJakartaSans(
-                    color: AppColors.primary,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 12)),
-          ),
-        ]),
-      ),
-      const SizedBox(height: 24),
-      Text('Enter your code',
-          style: Theme.of(context).textTheme.headlineLarge),
-      const SizedBox(height: 6),
-      Text('6-digit SMS code',
-          style: Theme.of(context).textTheme.bodyMedium),
-      const SizedBox(height: 24),
-      Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: List.generate(
-            6,
-            (i) => _OtpBox(
-                  ctrl: ctrls[i],
-                  focus: focusNodes[i],
-                  onChanged: (v) => onChanged(v, i),
-                )),
-      ),
-      if (error != null) ...[
-        const SizedBox(height: 12),
-        _ErrorBox(error!),
-      ],
-      const SizedBox(height: 24),
-      SizedBox(
-        width: double.infinity,
-        height: 52,
-        child: ElevatedButton(
-          onPressed: isLoading ? null : onVerify,
-          child: isLoading
-              ? const SizedBox(
-                  width: 20, height: 20,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
-              : const Text('Verify & Continue'),
-        ),
-      ),
-      const SizedBox(height: 14),
-      Center(
-        child: resendTimer > 0
-            ? Text('Resend in ${resendTimer}s',
-                style: Theme.of(context).textTheme.bodySmall)
-            : TextButton(
-                onPressed: onResend,
-                child: const Text('Resend Code')),
-      ),
-    ]);
-  }
-}
-
-class _OtpBox extends StatelessWidget {
-  final TextEditingController ctrl;
-  final FocusNode focus;
-  final ValueChanged<String> onChanged;
-  const _OtpBox(
-      {required this.ctrl,
-      required this.focus,
-      required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 46, height: 58,
-      child: TextField(
-        controller: ctrl,
-        focusNode: focus,
-        keyboardType: TextInputType.number,
-        textAlign: TextAlign.center,
-        maxLength: 1,
-        onChanged: onChanged,
-        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        style: GoogleFonts.plusJakartaSans(
-            fontSize: 22, fontWeight: FontWeight.w800),
-        decoration: InputDecoration(
-          counterText: '',
-          contentPadding: EdgeInsets.zero,
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide:
-                const BorderSide(color: AppColors.border),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(
-                color: AppColors.primary, width: 2),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── PROFILE SETUP STEP ───────────────────────────────────────────────────────
-class _ProfileStep extends StatelessWidget {
-  final TextEditingController nameCtrl;
-  final String role;
-  final ValueChanged<String> onRoleChanged;
-  final VoidCallback onSubmit;
-  final bool isLoading;
-
-  const _ProfileStep({
-    super.key,
-    required this.nameCtrl,
-    required this.role,
-    required this.onRoleChanged,
-    required this.onSubmit,
-    required this.isLoading,
-  });
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _setupView() {
     const roles = [
-      ('tenant',   '🔍', 'Tenant'),
-      ('agent',    '🏷', 'Agent'),
-      ('landlord', '🏠', 'Landlord'),
+      ('tenant', Icons.home_outlined, 'Find a home', 'Search and discover properties'),
+      ('landlord', Icons.description_outlined, 'List my property', 'Reach serious buyers and tenants'),
+      ('agent', Icons.groups_outlined, 'Manage listings for clients', 'Tools for agents and professionals'),
     ];
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text('👋', style: TextStyle(fontSize: 36)),
-      const SizedBox(height: 16),
-      Text('Quick setup',
-          style: Theme.of(context).textTheme.headlineLarge),
-      const SizedBox(height: 6),
-      Text('One step to personalise your experience.',
-          style: Theme.of(context).textTheme.bodyMedium),
-      const SizedBox(height: 24),
-      TextField(
-        controller: nameCtrl,
-        textCapitalization: TextCapitalization.words,
-        decoration: const InputDecoration(
-          labelText: 'Your Name',
-          prefixIcon: Icon(Icons.person_outline),
-        ),
-      ),
-      const SizedBox(height: 20),
-      Text('I am a…',
-          style: Theme.of(context).textTheme.titleMedium),
-      const SizedBox(height: 10),
-      Row(
-        children: roles.map((r) {
-          final (id, icon, label) = r;
-          final sel = role == id;
-          return Expanded(
-            child: GestureDetector(
-              onTap: () => onRoleChanged(id),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                margin: const EdgeInsets.only(right: 8),
-                padding:
-                    const EdgeInsets.symmetric(vertical: 14),
-                decoration: BoxDecoration(
-                  color: sel
-                      ? AppColors.primaryPale
-                      : AppColors.bg,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: sel
-                        ? AppColors.primary
-                        : AppColors.border,
-                    width: sel ? 2 : 1,
-                  ),
+    return Scaffold(
+      backgroundColor: AppColors.surface,
+      appBar: PsTopBar(onBack: () => ref.read(authServiceProvider).signOut().then((_) { if (mounted) setState(() => _step = _Step.method); }), action: Padding(padding: const EdgeInsets.only(right: 12), child: Center(child: Text('Setup', style: AppText.small)))),
+      body: ListView(padding: kPagePadding, children: [
+        Text('Make Propsure yours', style: AppText.display),
+        const SizedBox(height: 8),
+        Text('A few details help us show you the right properties and tools.', style: AppText.bodyMuted),
+        const SizedBox(height: 24),
+        PsField(label: 'Your name', controller: _name, hint: 'Your name', autofillHints: const [AutofillHints.givenName]),
+        const SizedBox(height: 20),
+        Text("I'm here to", style: AppText.label),
+        const SizedBox(height: 10),
+        Column(children: [
+          for (final r in roles)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Semantics(
+                button: true,
+                selected: _role == r.$1,
+                label: '${r.$3}. ${r.$4}',
+                excludeSemantics: true,
+                child: PsCard(
+                  onTap: () => setState(() => _role = r.$1),
+                  color: _role == r.$1 ? AppColors.primaryPale : AppColors.card,
+                  borderColor: _role == r.$1 ? AppColors.primary : AppColors.border,
+                  child: Row(children: [
+                    Icon(r.$2, size: 30, color: AppColors.primary),
+                    const SizedBox(width: 14),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(r.$3, style: AppText.title), Text(r.$4, style: AppText.small)])),
+                    if (_role == r.$1) const Icon(Icons.check_circle_rounded, color: AppColors.primary),
+                  ]),
                 ),
-                child: Column(children: [
-                  Text(icon,
-                      style:
-                          const TextStyle(fontSize: 22)),
-                  const SizedBox(height: 5),
-                  Text(label,
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: sel
-                            ? AppColors.primary
-                            : AppColors.text2,
-                      )),
-                ]),
               ),
             ),
-          );
-        }).toList(),
-      ),
-      const SizedBox(height: 28),
-      SizedBox(
-        width: double.infinity,
-        height: 52,
-        child: ElevatedButton(
-          onPressed: isLoading ? null : onSubmit,
-          child: isLoading
-              ? const SizedBox(
-                  width: 20, height: 20,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white))
-              : const Text("Let's Go →"),
-        ),
-      ),
-    ]);
+        ]),
+        const SizedBox(height: 4),
+        Text('Listing a property and managing client listings are different permissions. Neither gives you a verified status; checks are separate.', style: AppText.caption),
+        const SizedBox(height: 20),
+        PsField(label: 'Your location', controller: _city, prefix: const Icon(Icons.location_on_outlined)),
+        const SizedBox(height: 8),
+        PsToggleRow(title: 'Send useful property alerts', subtitle: 'You can change this later.', value: _alerts, onChanged: (v) => setState(() => _alerts = v)),
+        _errorLine(),
+        const SizedBox(height: 16),
+        PsButton('Continue', loading: _busy, onPressed: _finishSetup),
+        Center(child: PsLink('Skip for now', underline: false, onTap: () { if (_name.text.trim().length < 2) { _name.text = 'Propsure user'; } _finishSetup(); })),
+        const SizedBox(height: 24),
+      ]),
+    );
+  }
+
+  Widget _resetView() {
+    return Scaffold(
+      backgroundColor: AppColors.surface,
+      appBar: PsTopBar(title: 'Reset password', onBack: () => setState(() => _step = _Step.method)),
+      body: ListView(padding: kPagePadding, children: [
+        Text('Enter the email you registered with. If an account exists we will send a reset link.', style: AppText.bodyMuted),
+        const SizedBox(height: 20),
+        PsField(label: 'Email', controller: _email, keyboardType: TextInputType.emailAddress),
+        const SizedBox(height: 20),
+        PsButton('Send reset link', loading: _busy, onPressed: () async {
+          setState(() => _busy = true);
+          await ref.read(authServiceProvider).sendPasswordReset(email: _email.text);
+          if (!mounted) return;
+          setState(() { _busy = false; _step = _Step.method; });
+          showPsSnack(context, 'If an account exists for that email, a reset link is on its way.');
+        }),
+      ]),
+    );
   }
 }
 
-// ─── ERROR BOX ────────────────────────────────────────────────────────────────
-class _ErrorBox extends StatelessWidget {
-  final String msg;
-  const _ErrorBox(this.msg);
+/// Six accessible code boxes backed by one hidden text field so paste,
+/// autofill (SMS one-tap) and the numeric keypad all work.
+class _CodeBoxes extends StatelessWidget {
+  final TextEditingController controller;
+  final VoidCallback onComplete;
+  const _CodeBoxes({required this.controller, required this.onComplete});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding:
-          const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(
-        color: AppColors.error.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-            color: AppColors.error.withValues(alpha: 0.2)),
-      ),
-      child: Row(children: [
-        const Icon(Icons.error_outline,
-            color: AppColors.error, size: 15),
-        const SizedBox(width: 7),
-        Expanded(
-            child: Text(msg,
-                style: GoogleFonts.plusJakartaSans(
-                    color: AppColors.error, fontSize: 12))),
+    return Semantics(
+      label: 'Six digit verification code',
+      textField: true,
+      child: Stack(children: [
+        ValueListenableBuilder<TextEditingValue>(
+          valueListenable: controller,
+          builder: (_, v, __) => Row(children: [
+            for (var i = 0; i < 6; i++) ...[
+              Expanded(
+                child: Container(
+                  height: 56,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: AppColors.card,
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                    border: Border.all(color: i == v.text.length ? AppColors.primary : AppColors.border, width: i == v.text.length ? 2 : 1),
+                  ),
+                  child: Text(i < v.text.length ? v.text[i] : '', style: AppText.h2),
+                ),
+              ),
+              if (i < 5) const SizedBox(width: 8),
+            ],
+          ]),
+        ),
+        Positioned.fill(
+          child: Opacity(
+            opacity: 0,
+            child: TextField(
+              controller: controller,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              autofillHints: const [AutofillHints.oneTimeCode],
+              maxLength: 6,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              onChanged: (v) { if (v.length == 6) onComplete(); },
+            ),
+          ),
+        ),
       ]),
     );
   }

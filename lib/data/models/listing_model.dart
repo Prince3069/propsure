@@ -5,9 +5,9 @@ export '../../core/constants/listing_category.dart' show ListingCategory;
 
 enum SortOrder { newest, oldest, priceAsc, priceDesc, featured }
 
-/// verification_status lifecycle for both users and listings.
-/// Set ONLY by trusted backend code (Cloud Functions with an admin/reviewer
-/// custom claim) — never write these client-side. See Firestore rules.
+/// verification_status lifecycle for users (identity). Set ONLY by trusted
+/// backend code (Cloud Functions with an admin/reviewer claim) — never by
+/// the client. Listing-level checks live in [PassportEntry].
 enum VerificationStatus { none, pending, approved, rejected, expired }
 
 VerificationStatus verificationStatusFromString(String? raw) {
@@ -27,6 +27,8 @@ VerificationStatus verificationStatusFromString(String? raw) {
 
 String verificationStatusToString(VerificationStatus s) => s.name;
 
+DateTime? _ts(dynamic v) => v is Timestamp ? v.toDate() : null;
+
 class PropertyLocation {
   final double latitude;
   final double longitude;
@@ -38,12 +40,8 @@ class PropertyLocation {
   final String street;
   final String fullAddress;
   final Map<String, dynamic>? geoData;
-  // 'exact' | 'street' | 'area' | 'approximate'. Set to 'approximate'
-  // whenever the coordinates came from an area-center fallback rather than
-  // a pin the user actually placed — the review flagged that the app was
-  // presenting area-center coordinates as if they were the precise
-  // property location. Defaults to 'exact' for backward compatibility with
-  // documents written before this field existed (most were pin-selected).
+  // 'exact' | 'street' | 'area' | 'approximate'. Anything that is not an
+  // explicit exact pin is shown to renters as an approximate area.
   final String locationPrecision;
 
   const PropertyLocation({
@@ -57,8 +55,12 @@ class PropertyLocation {
     this.street = '',
     required this.fullAddress,
     this.geoData,
-    this.locationPrecision = 'exact',
+    this.locationPrecision = 'approximate',
   });
+
+  /// Renters only ever see an approximate area unless the agent explicitly
+  /// confirmed a precise pin AND consented to showing it.
+  bool get isApproximate => locationPrecision != 'exact';
 
   factory PropertyLocation.fromMap(Map<String, dynamic> map) {
     return PropertyLocation(
@@ -72,7 +74,9 @@ class PropertyLocation {
       street: map['street'] ?? '',
       fullAddress: map['fullAddress'] ?? '',
       geoData: map['geoData'],
-      locationPrecision: map['locationPrecision'] as String? ?? 'exact',
+      // Old documents without the field were area-centre fallbacks more often
+      // than not, so they default to approximate (the safe reading).
+      locationPrecision: map['locationPrecision'] as String? ?? 'approximate',
     );
   }
 
@@ -91,6 +95,164 @@ class PropertyLocation {
       };
 }
 
+// ─── MOVE-IN CHARGES ─────────────────────────────────────────────────────────
+
+enum ChargePeriod { oneTime, annual, monthly }
+
+ChargePeriod chargePeriodFromString(String? s) {
+  switch (s) {
+    case 'annual':
+      return ChargePeriod.annual;
+    case 'monthly':
+      return ChargePeriod.monthly;
+    default:
+      return ChargePeriod.oneTime;
+  }
+}
+
+String chargePeriodToString(ChargePeriod p) {
+  switch (p) {
+    case ChargePeriod.oneTime:
+      return 'one_time';
+    case ChargePeriod.annual:
+      return 'annual';
+    case ChargePeriod.monthly:
+      return 'monthly';
+  }
+}
+
+/// A single charge an agent has listed. Unknown is not zero: a charge that
+/// is not listed is simply not in this list (and, for rentals, the listing
+/// is flagged "unconfirmed charges" unless the agent attests completeness).
+class ListingCharge {
+  final String type; // agency | legal | caution | service | utilities | other
+  final String label;
+  final double amount;
+  final ChargePeriod period;
+  final String recipient; // agent | landlord | management | other
+  final String refundable; // yes | no | unknown
+  final double? percent; // e.g. 10 for "10% of annual rent" (display only)
+  final DateTime? confirmedAt;
+
+  const ListingCharge({
+    required this.type,
+    required this.label,
+    required this.amount,
+    this.period = ChargePeriod.oneTime,
+    this.recipient = 'agent',
+    this.refundable = 'unknown',
+    this.percent,
+    this.confirmedAt,
+  });
+
+  bool get isUpfront => period != ChargePeriod.monthly;
+
+  factory ListingCharge.fromMap(Map<String, dynamic> m) => ListingCharge(
+        type: m['type'] as String? ?? 'other',
+        label: m['label'] as String? ?? '',
+        amount: (m['amount'] ?? 0).toDouble(),
+        period: chargePeriodFromString(m['period'] as String?),
+        recipient: m['recipient'] as String? ?? 'agent',
+        refundable: m['refundable'] as String? ?? 'unknown',
+        percent: (m['percent'] as num?)?.toDouble(),
+        confirmedAt: _ts(m['confirmedAt']),
+      );
+
+  Map<String, dynamic> toMap() => {
+        'type': type,
+        'label': label,
+        'amount': amount,
+        'period': chargePeriodToString(period),
+        'recipient': recipient,
+        'refundable': refundable,
+        if (percent != null) 'percent': percent,
+        'source': 'agent',
+        'confirmedAt': Timestamp.fromDate(confirmedAt ?? DateTime.now()),
+      };
+}
+
+// ─── PASSPORT ────────────────────────────────────────────────────────────────
+
+/// One scoped check on a listing's passport, each with its own date, expiry
+/// and plain-language limitation. Written only by Cloud Functions.
+class PassportEntry {
+  final String state; // reviewed | rejected | needs_changes | none
+  final DateTime? checkedAt;
+  final DateTime? expiresAt;
+  final String? limitation;
+
+  const PassportEntry({this.state = 'none', this.checkedAt, this.expiresAt, this.limitation});
+
+  bool get isCurrent =>
+      state == 'reviewed' && (expiresAt == null || expiresAt!.isAfter(DateTime.now()));
+
+  factory PassportEntry.fromMap(Map<String, dynamic>? m) {
+    if (m == null) return const PassportEntry();
+    return PassportEntry(
+      state: m['state'] as String? ?? 'none',
+      checkedAt: _ts(m['checkedAt']),
+      expiresAt: _ts(m['expiresAt']),
+      limitation: m['limitation'] as String?,
+    );
+  }
+}
+
+/// A still taken from the agent's own video, with provenance.
+class ListingStill {
+  final String url;
+  final String source; // video | photo
+  final int? timestampMs;
+  final String? label;
+  const ListingStill({required this.url, this.source = 'photo', this.timestampMs, this.label});
+
+  factory ListingStill.fromMap(Map<String, dynamic> m) => ListingStill(
+        url: m['url'] as String? ?? '',
+        source: m['source'] as String? ?? 'photo',
+        timestampMs: (m['timestampMs'] as num?)?.toInt(),
+        label: m['label'] as String?,
+      );
+}
+
+/// A candidate frame awaiting the agent's review (private storage path).
+class VideoCandidate {
+  final String id;
+  final String path;
+  final int timestampMs;
+  const VideoCandidate({required this.id, required this.path, required this.timestampMs});
+
+  factory VideoCandidate.fromMap(Map<String, dynamic> m) => VideoCandidate(
+        id: m['id'] as String? ?? '',
+        path: m['path'] as String? ?? '',
+        timestampMs: (m['timestampMs'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// Where a walkthrough video is in the pipeline.
+enum VideoStatus { none, uploaded, validating, processing, needsReview, ready, failed, rejected }
+
+VideoStatus videoStatusFromString(String? s) {
+  switch (s) {
+    case 'uploaded':
+      return VideoStatus.uploaded;
+    case 'validating':
+      return VideoStatus.validating;
+    case 'processing':
+      return VideoStatus.processing;
+    case 'needs_review':
+      return VideoStatus.needsReview;
+    case 'ready':
+      return VideoStatus.ready;
+    case 'failed':
+      return VideoStatus.failed;
+    case 'rejected':
+      return VideoStatus.rejected;
+    default:
+      return VideoStatus.none;
+  }
+}
+
+// ─── LISTING ─────────────────────────────────────────────────────────────────
+
 class ListingModel {
   final String id;
   final String title;
@@ -102,29 +264,50 @@ class ListingModel {
   final int toilets;
   final PropertyLocation location;
   final List<String> images;
-  final String? videoUrl;
-  final String? video360Url;
+  final String? videoUrl; // 720p derivative
+  final String? videoLowUrl; // 360p derivative (low-data)
+  final String? posterUrl;
+  final int? videoDurationSec;
+  final VideoStatus videoStatus;
+  final String? videoRejectionReason;
+  final List<VideoCandidate> videoCandidates;
+  final String? videoCoverageWarning;
+  final List<ListingStill> stills;
+  final String? video360Url; // legacy field — never shown; no 360 support
   final String agentId;
   final String agentName;
   final String agentPhone;
   final String? agentPhoto;
-  final bool isVerified;
+  final bool isVerified; // legacy; the passport is the source of truth
   final bool isFeatured;
-  final String status;
-  final String category; // canonical value, e.g. for_rent, for_sale, short_stay, commercial
+  final DateTime? featuredUntil;
+  final bool safetyHold;
+  final String status; // draft | active | paused | rented | stale | archived
+  final String category; // for_rent | for_sale | short_stay | commercial
 
-  // ── Trust / verification metadata (2.2 of the review) ──
-  // `isVerified` above is kept for backward-compatible reads/queries, but is
-  // now DERIVED from verificationStatus rather than an independent flag.
-  // These fields are written ONLY by Cloud Functions — enforced in
-  // firestore.rules — never by the Flutter client.
+  // Trust metadata (legacy fields kept for old documents)
   final VerificationStatus verificationStatus;
-  final String? verificationType; // e.g. 'ownership', 'agent_authority'
+  final String? verificationType;
   final DateTime? verifiedAt;
-  final String? verifiedBy; // reviewer uid
+  final String? verifiedBy;
   final DateTime? verificationExpiresAt;
 
+  // Costs
+  final List<ListingCharge> charges;
+  final bool chargesComplete;
+  final List<String> unconfirmedCharges;
+
+  // Freshness
+  final DateTime? availabilityConfirmedAt;
+  final String? availabilityConfirmedBy; // agent | inspection | propsure
+  final bool needsRefresh;
+
+  // Passport
+  final PassportEntry authority;
+  final PassportEntry titleReview; // title review (separate check)
+
   final DateTime createdAt;
+  final DateTime? publishedAt;
   final DateTime? updatedAt;
   final DateTime? expiresAt;
   final int viewCount;
@@ -147,6 +330,14 @@ class ListingModel {
     required this.location,
     required this.images,
     this.videoUrl,
+    this.videoLowUrl,
+    this.posterUrl,
+    this.videoDurationSec,
+    this.videoStatus = VideoStatus.none,
+    this.videoRejectionReason,
+    this.videoCandidates = const [],
+    this.videoCoverageWarning,
+    this.stills = const [],
     this.video360Url,
     required this.agentId,
     required this.agentName,
@@ -154,14 +345,25 @@ class ListingModel {
     this.agentPhoto,
     this.isVerified = false,
     this.isFeatured = false,
-    this.status = 'active',
+    this.featuredUntil,
+    this.safetyHold = false,
+    this.status = 'draft',
     this.category = 'for_rent',
     this.verificationStatus = VerificationStatus.none,
     this.verificationType,
     this.verifiedAt,
     this.verifiedBy,
     this.verificationExpiresAt,
+    this.charges = const [],
+    this.chargesComplete = false,
+    this.unconfirmedCharges = const [],
+    this.availabilityConfirmedAt,
+    this.availabilityConfirmedBy,
+    this.needsRefresh = false,
+    this.authority = const PassportEntry(),
+    this.titleReview = const PassportEntry(),
     required this.createdAt,
+    this.publishedAt,
     this.updatedAt,
     this.expiresAt,
     this.viewCount = 0,
@@ -175,6 +377,7 @@ class ListingModel {
 
   factory ListingModel.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+    final passport = (data['passport'] as Map?)?.cast<String, dynamic>() ?? const {};
     return ListingModel(
       id: doc.id,
       title: data['title'] ?? '',
@@ -184,39 +387,54 @@ class ListingModel {
       bedrooms: (data['bedrooms'] ?? 0).toInt(),
       bathrooms: (data['bathrooms'] ?? 0).toInt(),
       toilets: (data['toilets'] ?? 0).toInt(),
-      location: PropertyLocation.fromMap(
-          (data['location'] as Map<String, dynamic>?) ?? {}),
+      location: PropertyLocation.fromMap((data['location'] as Map<String, dynamic>?) ?? {}),
       images: List<String>.from(data['images'] ?? []),
       videoUrl: data['videoUrl'],
+      videoLowUrl: data['videoLowUrl'],
+      posterUrl: data['posterUrl'],
+      videoDurationSec: (data['videoDurationSec'] as num?)?.toInt(),
+      videoStatus: videoStatusFromString(data['videoStatus'] as String?),
+      videoRejectionReason: data['videoRejectionReason'] as String?,
+      videoCandidates: ((data['videoCandidates'] as List?) ?? const [])
+          .map((e) => VideoCandidate.fromMap(Map<String, dynamic>.from(e as Map)))
+          .toList(),
+      videoCoverageWarning: data['videoCoverageWarning'] as String?,
+      stills: ((data['stills'] as List?) ?? const [])
+          .map((e) => ListingStill.fromMap(Map<String, dynamic>.from(e as Map)))
+          .toList(),
       video360Url: data['video360Url'],
       agentId: data['agentId'] ?? '',
       agentName: data['agentName'] ?? '',
       agentPhone: data['agentPhone'] ?? '',
       agentPhoto: data['agentPhoto'],
-      // Legacy documents may still contain "For Rent" / "Short Stay" etc.
-      // Normalize on every read so old data keeps working while the
-      // one-time migration script (see /migrations) catches up.
+      // Never a bare label: only an approved, unexpired legacy check counts.
       category: ListingCategory.fromAny(data['category'] as String?).value,
-      verificationStatus:
-          verificationStatusFromString(data['verificationStatus'] as String?),
+      verificationStatus: verificationStatusFromString(data['verificationStatus'] as String?),
       verificationType: data['verificationType'] as String?,
-      verifiedAt: (data['verifiedAt'] as Timestamp?)?.toDate(),
+      verifiedAt: _ts(data['verifiedAt']),
       verifiedBy: data['verifiedBy'] as String?,
-      verificationExpiresAt:
-          (data['verificationExpiresAt'] as Timestamp?)?.toDate(),
-      // Derived: only "approved" and not expired counts as verified.
-      isVerified: verificationStatusFromString(
-                  data['verificationStatus'] as String?) ==
+      verificationExpiresAt: _ts(data['verificationExpiresAt']),
+      isVerified: verificationStatusFromString(data['verificationStatus'] as String?) ==
               VerificationStatus.approved &&
-          !((data['verificationExpiresAt'] as Timestamp?)
-                  ?.toDate()
-                  .isBefore(DateTime.now()) ??
-              false),
+          !(_ts(data['verificationExpiresAt'])?.isBefore(DateTime.now()) ?? false),
       isFeatured: data['isFeatured'] ?? false,
+      featuredUntil: _ts(data['featuredUntil']),
+      safetyHold: data['safetyHold'] ?? false,
       status: data['status'] ?? 'active',
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
-      expiresAt: (data['expiresAt'] as Timestamp?)?.toDate(),
+      charges: ((data['charges'] as List?) ?? const [])
+          .map((e) => ListingCharge.fromMap(Map<String, dynamic>.from(e as Map)))
+          .toList(),
+      chargesComplete: data['chargesComplete'] ?? false,
+      unconfirmedCharges: List<String>.from(data['unconfirmedCharges'] ?? const []),
+      availabilityConfirmedAt: _ts(data['availabilityConfirmedAt']),
+      availabilityConfirmedBy: data['availabilityConfirmedBy'] as String?,
+      needsRefresh: data['needsRefresh'] ?? false,
+      authority: PassportEntry.fromMap((passport['authority'] as Map?)?.cast<String, dynamic>()),
+      titleReview: PassportEntry.fromMap((passport['title'] as Map?)?.cast<String, dynamic>()),
+      createdAt: _ts(data['createdAt']) ?? DateTime.now(),
+      publishedAt: _ts(data['publishedAt']),
+      updatedAt: _ts(data['updatedAt']),
+      expiresAt: _ts(data['expiresAt']),
       viewCount: (data['viewCount'] ?? 0).toInt(),
       inquiryCount: (data['inquiryCount'] ?? 0).toInt(),
       amenities: List<String>.from(data['amenities'] ?? []),
@@ -227,7 +445,10 @@ class ListingModel {
     );
   }
 
-  Map<String, dynamic> toMap() => {
+  /// The ONLY map a client may write when creating a listing. It is a draft:
+  /// status, featuring, passport, availability and counters are not here
+  /// because firestore.rules reject them and Cloud Functions own them.
+  Map<String, dynamic> toDraftMap() => {
         'title': title,
         'description': description,
         'price': price,
@@ -239,30 +460,19 @@ class ListingModel {
         'area': location.area,
         'city': location.city,
         'images': images,
-        'videoUrl': videoUrl,
-        'video360Url': video360Url,
         'agentId': agentId,
         'agentName': agentName,
         'agentPhone': agentPhone,
         'agentPhoto': agentPhoto,
-        'isVerified': isVerified,
-        'isFeatured': isFeatured,
-        'status': status,
-        // Defensive normalization: even if a caller somehow passes a legacy
-        // label, only the canonical machine value is ever persisted.
+        'status': 'draft',
         'category': ListingCategory.fromAny(category).value,
-        'verificationStatus': verificationStatusToString(verificationStatus),
-        'verificationType': verificationType,
-        'verifiedAt': verifiedAt != null ? Timestamp.fromDate(verifiedAt!) : null,
-        'verifiedBy': verifiedBy,
-        'verificationExpiresAt': verificationExpiresAt != null
-            ? Timestamp.fromDate(verificationExpiresAt!)
-            : null,
+        'charges': charges.map((c) => c.toMap()).toList(),
+        'chargesComplete': chargesComplete,
+        'unconfirmedCharges': unconfirmedCharges,
         'createdAt': Timestamp.fromDate(createdAt),
-        'updatedAt': updatedAt != null ? Timestamp.fromDate(updatedAt!) : null,
-        'expiresAt': expiresAt != null ? Timestamp.fromDate(expiresAt!) : null,
-        'viewCount': viewCount,
-        'inquiryCount': inquiryCount,
+        'updatedAt': FieldValue.serverTimestamp(),
+        'viewCount': 0,
+        'inquiryCount': 0,
         'amenities': amenities,
         'isFurnished': isFurnished,
         'petsAllowed': petsAllowed,
@@ -270,40 +480,58 @@ class ListingModel {
         'additionalInfo': additionalInfo,
       };
 
-  String get formattedPrice {
-    if (price >= 1000000) {
-      final m = price / 1000000;
-      return '₦${m % 1 == 0 ? m.toInt() : m.toStringAsFixed(1)}M';
-    }
-    if (price >= 1000) return '₦${(price / 1000).toInt()}k';
-    return '₦${price.toInt()}';
+  ListingCategory get categoryEnum => ListingCategory.fromAny(category);
+  bool get isActive => status == 'active';
+  bool get isDraft => status == 'draft';
+  bool get isLive => status == 'active' || status == 'stale';
+
+  /// "₦2.4m / year", "₦45k / night", "₦85m" — period always derived.
+  String get priceLabel {
+    final p = categoryEnum.periodWord;
+    return p.isEmpty ? _short(price) : '${_short(price)} / $p';
   }
 
-  ListingCategory get categoryEnum => ListingCategory.fromAny(category);
+  // Compact form kept here for the legacy getters below.
+  static String _short(double n) {
+    String c(double x, int d) {
+      var s = x.toStringAsFixed(d);
+      if (s.contains('.')) s = s.replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+      return s;
+    }
 
-  String get formattedPriceWithPeriod =>
-      '$formattedPrice${categoryEnum.priceSuffix}';
+    if (n >= 1000000) return '₦${c(n / 1000000, 2)}m';
+    if (n >= 1000) return '₦${c(n / 1000, 1)}k';
+    return '₦${n.round()}';
+  }
 
-  bool get isActive => status == 'active';
+  // Legacy getters (older call sites).
+  String get formattedPrice => _short(price);
+  String get formattedPriceWithPeriod => '$formattedPrice${categoryEnum.priceSuffix}';
+
+  /// A paid placement is "Sponsored" only while it is live and not under a
+  /// safety hold. Payment never changes any check.
+  bool get isSponsored =>
+      isFeatured && !safetyHold && (featuredUntil == null || featuredUntil!.isAfter(DateTime.now()));
+
+  /// Cover image: reviewed poster/still first, then the first photo.
+  String? get coverUrl => images.isNotEmpty ? images.first : posterUrl;
+  bool get hasVideo => videoUrl != null && videoStatus == VideoStatus.ready;
 }
 
-/// A single filter model. The old version had BOTH `query` and `searchQuery`
-/// (the repository read `filter.query`, screens wrote either one), and
-/// `copyWith()` silently dropped whichever text-search field it carried —
-/// editing one filter could wipe the user's current search text. There is
-/// now exactly one text-search field: `query`. There was also a dead
-/// `state` field that was accepted by the model but never applied by the
-/// repository query — removed per the review's "apply it or remove it"
-/// guidance, since nothing in the app currently supports state-level
-/// filtering (Propsure is Abuja-only for now).
+/// A single filter model. One text field (`query`), one place for every
+/// filter, and an honest count of what is active.
 class ListingFilter {
-  final String? query; // text search: matches title, area, propertyType, description
+  final String? query;
   final String? area;
   final String? propertyType;
   final String? category; // canonical ListingCategory.value, or null = any
   final int? minBedrooms;
   final double? minPrice;
   final double? maxPrice;
+  final double? maxMoveIn; // total move-in budget
+  final bool budgetIsMoveIn; // true = budget applies to move-in total
+  final List<String> mustHave; // amenity labels
+  final bool recentlyConfirmedOnly;
   final bool? isVerified;
   final bool? isFeatured;
   final SortOrder sortOrder;
@@ -316,15 +544,15 @@ class ListingFilter {
     this.minBedrooms,
     this.minPrice,
     this.maxPrice,
+    this.maxMoveIn,
+    this.budgetIsMoveIn = true,
+    this.mustHave = const [],
+    this.recentlyConfirmedOnly = false,
     this.isVerified,
     this.isFeatured,
     this.sortOrder = SortOrder.newest,
   });
 
-  /// Normalizes whatever category string comes in (route slug, legacy
-  /// label, canonical value) to the canonical value before it's stored on
-  /// the filter, so the repository query is always exact-matching against
-  /// what's actually in Firestore.
   factory ListingFilter.withCategory({
     String? query,
     String? area,
@@ -341,8 +569,7 @@ class ListingFilter {
       query: query,
       area: area,
       propertyType: propertyType,
-      category:
-          category == null ? null : ListingCategory.fromAny(category).value,
+      category: category == null ? null : ListingCategory.fromAny(category).value,
       minBedrooms: minBedrooms,
       minPrice: minPrice,
       maxPrice: maxPrice,
@@ -360,6 +587,10 @@ class ListingFilter {
     int? minBedrooms,
     double? minPrice,
     double? maxPrice,
+    double? maxMoveIn,
+    bool? budgetIsMoveIn,
+    List<String>? mustHave,
+    bool? recentlyConfirmedOnly,
     bool? isVerified,
     bool? isFeatured,
     SortOrder? sortOrder,
@@ -369,6 +600,7 @@ class ListingFilter {
     bool clearCategory = false,
     bool clearBeds = false,
     bool clearPrice = false,
+    bool clearMoveIn = false,
     bool clearVerified = false,
   }) {
     return ListingFilter(
@@ -377,21 +609,23 @@ class ListingFilter {
       propertyType: clearType ? null : (propertyType ?? this.propertyType),
       category: clearCategory
           ? null
-          : (category != null
-              ? ListingCategory.fromAny(category).value
-              : this.category),
+          : (category != null ? ListingCategory.fromAny(category).value : this.category),
       minBedrooms: clearBeds ? null : (minBedrooms ?? this.minBedrooms),
       minPrice: clearPrice ? null : (minPrice ?? this.minPrice),
       maxPrice: clearPrice ? null : (maxPrice ?? this.maxPrice),
+      maxMoveIn: clearMoveIn ? null : (maxMoveIn ?? this.maxMoveIn),
+      budgetIsMoveIn: budgetIsMoveIn ?? this.budgetIsMoveIn,
+      mustHave: mustHave ?? this.mustHave,
+      recentlyConfirmedOnly: recentlyConfirmedOnly ?? this.recentlyConfirmedOnly,
       isVerified: clearVerified ? null : (isVerified ?? this.isVerified),
       isFeatured: isFeatured ?? this.isFeatured,
       sortOrder: sortOrder ?? this.sortOrder,
     );
   }
 
-  /// Counts every field that actually affects the result set — the old
-  /// version omitted category, isFeatured, and the text query entirely,
-  /// so the "N filters active" chip in Search under-counted.
+  /// A completely empty filter (clear-all means this, not "most of it").
+  static const ListingFilter empty = ListingFilter();
+
   int get activeFilterCount {
     int c = 0;
     if (query != null && query!.isNotEmpty) c++;
@@ -399,7 +633,9 @@ class ListingFilter {
     if (propertyType != null) c++;
     if (category != null) c++;
     if (minBedrooms != null) c++;
-    if (minPrice != null || maxPrice != null) c++;
+    if (minPrice != null || maxPrice != null || maxMoveIn != null) c++;
+    if (mustHave.isNotEmpty) c++;
+    if (recentlyConfirmedOnly) c++;
     if (isVerified == true) c++;
     if (isFeatured == true) c++;
     return c;
@@ -416,11 +652,24 @@ class ListingFilter {
           other.minBedrooms == minBedrooms &&
           other.minPrice == minPrice &&
           other.maxPrice == maxPrice &&
+          other.maxMoveIn == maxMoveIn &&
+          other.budgetIsMoveIn == budgetIsMoveIn &&
+          _listEq(other.mustHave, mustHave) &&
+          other.recentlyConfirmedOnly == recentlyConfirmedOnly &&
           other.isVerified == isVerified &&
           other.isFeatured == isFeatured &&
           other.sortOrder == sortOrder;
 
+  static bool _listEq(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
   @override
-  int get hashCode => Object.hash(query, area, propertyType, category,
-      minBedrooms, minPrice, maxPrice, isVerified, isFeatured, sortOrder);
+  int get hashCode => Object.hash(query, area, propertyType, category, minBedrooms, minPrice,
+      maxPrice, maxMoveIn, budgetIsMoveIn, Object.hashAll(mustHave), recentlyConfirmedOnly,
+      isVerified, isFeatured, sortOrder);
 }

@@ -1,11 +1,12 @@
 {
   "name": "propsure-functions",
-  "description": "Cloud Functions for Propsure — Phase 1 (trust & payment integrity)",
-  "engines": { "node": "20" },
+  "description": "Cloud Functions for Propsure — payments, listings lifecycle, trust, support, media",
+  "engines": { "node": "22" },
   "main": "index.js",
   "scripts": {
-    "serve": "firebase emulators:start --only functions",
-    "deploy": "firebase deploy --only functions"
+    "serve": "firebase emulators:start --only functions,firestore",
+    "deploy": "firebase deploy --only functions",
+    "test": "node test/run.js"
   },
   "dependencies": {
     "firebase-admin": "^12.1.0",

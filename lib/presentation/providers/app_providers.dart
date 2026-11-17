@@ -14,8 +14,10 @@ import '../../data/repositories/verification_repository.dart';
 import '../../data/repositories/report_repository.dart';
 import '../../data/repositories/enquiry_repository.dart';
 import '../../data/repositories/saved_search_repository.dart';
+import '../../data/repositories/shortlist_repository.dart';
 import '../../data/models/verification_request_model.dart';
 import '../../services/auth_service.dart';
+import '../../services/functions_service.dart';
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 final authServiceProvider = Provider<AuthService>((ref) => AuthService());
@@ -192,6 +194,12 @@ final myVerificationRequestProvider =
   return ref.watch(verificationRepositoryProvider).watchLatestForUser(uid);
 });
 
+final myVerificationRequestsProvider = StreamProvider<List<VerificationRequestModel>>((ref) {
+  final uid = ref.watch(currentUserIdProvider);
+  if (uid == null) return Stream.value(const []);
+  return ref.watch(verificationRepositoryProvider).watchAllForUser(uid);
+});
+
 // ── Filter State — NotifierProvider works on all riverpod versions ────────────
 class FilterNotifier extends Notifier<ListingFilter> {
   @override
@@ -245,17 +253,33 @@ final savedListingsProvider =
   return repo.watchSavedListings(userId: userId);
 });
 
-// ── Real category counts ──────────────────────────────────────────────────────
-final categoryCountProvider =
-    StreamProvider.family<int, String>((ref, propertyType) {
-  final repo = ref.watch(listingRepositoryProvider);
-  return repo.watchCategoryCount(propertyType);
+// ── Shortlists ────────────────────────────────────────────────────────────────
+final shortlistRepositoryProvider = Provider<ShortlistRepository>((ref) => ShortlistRepository());
+final myShortlistsProvider = StreamProvider<List<ShortlistModel>>((ref) {
+  final uid = ref.watch(currentUserIdProvider);
+  if (uid == null) return Stream.value(const []);
+  return ref.watch(shortlistRepositoryProvider).watchMine(uid);
+});
+final shortlistProvider = StreamProvider.family<ShortlistModel?, String>(
+    (ref, id) => ref.watch(shortlistRepositoryProvider).watch(id));
+
+// ── Server callables & pricing ────────────────────────────────────────────────
+final functionsServiceProvider = Provider<FunctionsService>((ref) => FunctionsService());
+
+/// Prices and limits come from the server catalog — never hard-coded in the app.
+final pricingProvider = FutureProvider<PricingInfo>((ref) => ref.watch(functionsServiceProvider).getPricing());
+
+// ── Public agent profile (server-written mirror) ──────────────────────────────
+final publicProfileProvider = StreamProvider.family<PublicProfile?, String>((ref, uid) {
+  return FirebaseFirestore.instance
+      .collection('public_profiles')
+      .doc(uid)
+      .snapshots()
+      .map((d) => d.exists ? PublicProfile.fromFirestore(d) : null);
 });
 
-final totalListingsCountProvider = StreamProvider<int>((ref) {
-  final repo = ref.watch(listingRepositoryProvider);
-  return repo.watchTotalListings();
-});
+/// A role-aware flag: true when the signed-in user manages listings.
+final isAgentProvider = Provider<bool>((ref) => ref.watch(currentUserModelProvider).asData?.value?.isAgent ?? false);
 
 // ── Founder promo (first 100 agents free) ─────────────────────────────────────
 // Live "how many spots left" — reads the single promotions/founderProgram
@@ -272,95 +296,10 @@ final founderPromoStatusProvider =
     final d = snap.data();
     final claimed = (d?['slotsClaimed'] as num?)?.toInt() ?? 0;
     final total = (d?['slotsTotal'] as num?)?.toInt() ?? 100;
-    final active = d?['active'] as bool? ?? true;
+    final active = d?['active'] as bool? ?? false; // off until the founder enables it
     return (claimed: claimed, total: total, active: active);
   });
 });
-
-// ── Upload ────────────────────────────────────────────────────────────────────
-class UploadState {
-  final bool isUploading;
-  final double progress;
-  final String? error;
-  final String? uploadedId;
-
-  const UploadState({
-    this.isUploading = false,
-    this.progress = 0,
-    this.error,
-    this.uploadedId,
-  });
-
-  UploadState copyWith({
-    bool? isUploading,
-    double? progress,
-    String? error,
-    String? uploadedId,
-  }) =>
-      UploadState(
-        isUploading: isUploading ?? this.isUploading,
-        progress: progress ?? this.progress,
-        error: error,
-        uploadedId: uploadedId ?? this.uploadedId,
-      );
-}
-
-class UploadNotifier extends Notifier<UploadState> {
-  @override
-  UploadState build() => const UploadState();
-
-  Future<String?> uploadListing({
-    required Map<String, dynamic> data,
-    required List<String> imagePaths,
-    String? videoPath,
-    String? video360Path,
-  }) async {
-    final user = ref.read(currentUserModelProvider).value;
-    if (user == null) return null;
-
-    state = state.copyWith(isUploading: true, progress: 0);
-
-    try {
-      final repo = ref.read(listingRepositoryProvider);
-      final id = await repo.createListing(
-        agentId: user.uid,
-        agentName: user.name,
-        agentPhone: user.phone,
-        agentPhoto: user.profilePhoto,
-        location: data['location'] as PropertyLocation,
-        title: data['title'] as String,
-        description: data['description'] as String,
-        price: data['price'] as double,
-        propertyType: data['propertyType'] as String,
-        category: data['category'] as String,
-        bedrooms: data['bedrooms'] as int,
-        bathrooms: data['bathrooms'] as int,
-        toilets: data['toilets'] as int,
-        localImagePaths: imagePaths,
-        localVideoPath: videoPath,
-        local360VideoPath: video360Path,
-        amenities: (data['amenities'] as List?)?.cast<String>() ?? [],
-        isFurnished: data['isFurnished'] as bool? ?? false,
-        petsAllowed: data['petsAllowed'] as bool? ?? false,
-        parkingAvailable: data['parkingAvailable'] as bool? ?? false,
-        additionalInfo: data['additionalInfo'] as String?,
-        onProgress: (p) => state = state.copyWith(progress: p),
-      );
-      state = state.copyWith(isUploading: false, progress: 1.0, uploadedId: id);
-      return id;
-    } catch (e) {
-      state = state.copyWith(isUploading: false, error: e.toString());
-      return null;
-    }
-  }
-
-  void reset() => state = const UploadState();
-}
-
-final uploadProvider =
-    NotifierProvider<UploadNotifier, UploadState>(UploadNotifier.new);
-
-final listingUploadProvider = uploadProvider;
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
 final userChatsProvider =
@@ -413,8 +352,5 @@ final agentPendingCountProvider =
 });
 
 // ── User by ID ────────────────────────────────────────────────────────────────
-final userByIdProvider =
-    FutureProvider.family<UserModel?, String>((ref, uid) async {
-  final auth = ref.watch(authServiceProvider);
-  return auth.getUserProfile(uid);
-});
+// Other people's data comes from the public mirror only. Private user
+// documents are readable by their owner (and reviewers) alone.

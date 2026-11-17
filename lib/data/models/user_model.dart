@@ -110,6 +110,25 @@ class UserModel {
     );
   }
 
+  /// The ONLY map a client may write when creating its own profile. Trust,
+  /// payment and counter fields are server-owned (firestore.rules rejects
+  /// them on create), so they are deliberately absent.
+  Map<String, dynamic> toCreateMap() => {
+        'name': name,
+        'phone': phone,
+        'email': email,
+        'profilePhoto': profilePhoto,
+        'role': role,
+        'isPhoneVerified': isPhoneVerified,
+        'bio': bio,
+        'agencyName': agencyName,
+        'savedListings': savedListings,
+        'createdAt': Timestamp.fromDate(createdAt),
+        'lastSeen': FieldValue.serverTimestamp(),
+        'fcmToken': fcmToken,
+      };
+
+  /// Read-only snapshot (tests, caching). Never write this to Firestore.
   Map<String, dynamic> toMap() => {
         'name': name,
         'phone': phone,
@@ -171,6 +190,59 @@ class UserModel {
       verifiedAt: verifiedAt,
       verifiedBy: verifiedBy,
       verificationExpiresAt: verificationExpiresAt,
+    );
+  }
+}
+
+
+/// Public, server-written mirror of an agent (public_profiles/{uid}).
+/// Identity checks live here — never on the private users document.
+class PublicProfile {
+  final String uid;
+  final String name;
+  final String? photo;
+  final String? agencyName;
+  final String? bio;
+  final String role;
+  final int activeListings;
+  final VerificationStatus identity;
+  final DateTime? identityCheckedAt;
+  final DateTime? identityExpiresAt;
+  final DateTime? memberSince;
+
+  const PublicProfile({
+    required this.uid,
+    required this.name,
+    this.photo,
+    this.agencyName,
+    this.bio,
+    this.role = 'agent',
+    this.activeListings = 0,
+    this.identity = VerificationStatus.none,
+    this.identityCheckedAt,
+    this.identityExpiresAt,
+    this.memberSince,
+  });
+
+  bool get identityReviewed =>
+      identity == VerificationStatus.approved &&
+      !(identityExpiresAt?.isBefore(DateTime.now()) ?? false);
+
+  factory PublicProfile.fromFirestore(DocumentSnapshot doc) {
+    final d = (doc.data() as Map<String, dynamic>?) ?? const {};
+    DateTime? t(dynamic v) => v is Timestamp ? v.toDate() : null;
+    return PublicProfile(
+      uid: doc.id,
+      name: d['name'] ?? 'Agent',
+      photo: d['photo'] ?? d['profilePhoto'],
+      agencyName: d['agencyName'],
+      bio: d['bio'],
+      role: d['role'] ?? 'agent',
+      activeListings: (d['liveListings'] ?? 0).toInt(),
+      identity: d['identityChecked'] == true ? VerificationStatus.approved : VerificationStatus.none,
+      identityCheckedAt: t(d['identityCheckedAt']),
+      identityExpiresAt: t(d['identityExpiresAt']),
+      memberSince: t(d['memberSince']),
     );
   }
 }

@@ -1,661 +1,281 @@
-// ignore_for_file: deprecated_member_use
-
+import 'package:csv/csv.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:csv/csv.dart';
-import 'dart:convert';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:uuid/uuid.dart';
-import '../../../core/constants/app_theme.dart';
 import '../../../core/constants/app_constants.dart';
-import '../../../core/constants/listing_category.dart';
+import '../../../core/constants/app_theme.dart';
+import '../../../core/utils/format.dart';
+import '../../../core/widgets/common_widgets.dart';
+import '../../../data/models/listing_model.dart';
+import '../../../services/location_service.dart';
+import '../listings/add_listing_screen.dart' show AreaBoundsLookup;
 import '../../providers/app_providers.dart';
 
-class BulkUploadScreen extends ConsumerStatefulWidget {
-  const BulkUploadScreen({super.key});
-  @override
-  ConsumerState<BulkUploadScreen> createState() => _BulkUploadScreenState();
+const String _template =
+    'title,area,bedrooms,bathrooms,annual_rent,description\n'
+    '2-bedroom flat,Gwarinpa,2,2,2400000,Bright flat near the main road\n';
+
+class _Row {
+  final String title, area, description;
+  final int beds, baths;
+  final double price;
+  final String? problem;
+  _Row(this.title, this.area, this.beds, this.baths, this.price,
+      this.description, this.problem);
+  bool get valid => problem == null;
 }
 
-class _BulkUploadScreenState extends ConsumerState<BulkUploadScreen> {
-  List<Map<String, dynamic>> _parsed = [];
-  List<String> _errors = [];
-  bool _uploading = false;
-  int _uploaded = 0;
-  int _failed = 0;
-  String _status = '';
+/// Imports rows as DRAFTS only. Imported text never marks a property
+/// verified, and drafts still need media and a review before publishing.
+class BulkImportScreen extends ConsumerStatefulWidget {
+  const BulkImportScreen({super.key});
+  @override
+  ConsumerState<BulkImportScreen> createState() => _BulkState();
+}
 
-  // CSV column order expected:
-  // title, description, price, property_type, area, city, bedrooms, bathrooms,
-  // toilets, furnished, condition, amenities (semicolon separated), category
-  static const _requiredColumns = [
-    'title',
-    'price',
-    'property_type',
-    'area',
-    'bedrooms',
-    'bathrooms',
-  ];
+class _BulkState extends ConsumerState<BulkImportScreen> {
+  List<_Row> _rows = const [];
+  bool _busy = false;
+  String? _error;
 
-  Future<void> _pickCSV() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['csv'],
-      withData: true,
-    );
-    if (result == null || result.files.isEmpty) return;
-
-    setState(() {
-      _parsed = [];
-      _errors = [];
-      _status = 'Parsing CSV…';
-    });
-
+  Future<void> _pick() async {
+    setState(() => _error = null);
+    final res = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['csv'],
+        withData: true);
+    final bytes = res?.files.single.bytes;
+    if (bytes == null) {
+      return;
+    }
     try {
-      final bytes = result.files.first.bytes;
-      if (bytes == null) return;
-      final content = utf8.decode(bytes);
-      final rows = const CsvToListConverter().convert(content);
-
-      if (rows.isEmpty) {
-        setState(() {
-          _errors = ['CSV file is empty.'];
-          _status = '';
-        });
+      final table =
+          const CsvToListConverter(eol: '\n', shouldParseNumbers: false)
+              .convert(String.fromCharCodes(bytes).replaceAll('\r\n', '\n'));
+      if (table.length < 2) {
+        setState(() => _error = 'That file has no rows.');
         return;
       }
-
-      // First row = headers
-      final headers =
-          rows.first.map((h) => h.toString().toLowerCase().trim()).toList();
-
-      // Validate required columns
-      final missing =
-          _requiredColumns.where((c) => !headers.contains(c)).toList();
-      if (missing.isNotEmpty) {
-        setState(() {
-          _errors = ['Missing required columns: ${missing.join(", ")}'];
-          _status = '';
-        });
-        return;
+      final head =
+          table.first.map((e) => e.toString().trim().toLowerCase()).toList();
+      int col(String n) => head.indexOf(n);
+      String cell(List r, String n) {
+        final i = col(n);
+        return (i < 0 || i >= r.length) ? '' : r[i].toString().trim();
       }
 
-      final parsed = <Map<String, dynamic>>[];
-      final errors = <String>[];
-
-      for (int i = 1; i < rows.length; i++) {
-        final row = rows[i];
-        if (row.every((cell) => cell.toString().trim().isEmpty)) {
-          continue; // skip blank rows
+      final areas = AppConstants.abujaAreas.map((a) => a.toLowerCase()).toSet();
+      final rows = <_Row>[];
+      for (final r in table.skip(1).take(100)) {
+        if (r.every((c) => c.toString().trim().isEmpty)) {
+          continue;
         }
-
-        final record = <String, dynamic>{};
-        for (int j = 0; j < headers.length && j < row.length; j++) {
-          record[headers[j]] = row[j].toString().trim();
+        final title = cell(r, 'title');
+        final area = cell(r, 'area');
+        final price = Money.parse(cell(r, 'annual_rent')) ?? 0;
+        String? problem;
+        if (title.length < 3) {
+          problem = 'Missing title';
+        } else if (!areas.contains(area.toLowerCase())) {
+          problem = 'Unknown area';
+        } else if (price <= 0) {
+          problem = 'Missing price';
         }
-
-        // Validate row
-        final rowErrors = <String>[];
-        if ((record['title'] as String? ?? '').isEmpty) {
-          rowErrors.add('title is empty');
-        }
-        final price = double.tryParse(record['price']?.toString() ?? '');
-        if (price == null || price <= 0) rowErrors.add('invalid price');
-        final beds = int.tryParse(record['bedrooms']?.toString() ?? '');
-        if (beds == null) rowErrors.add('invalid bedrooms');
-
-        if (rowErrors.isNotEmpty) {
-          errors.add('Row ${i + 1}: ${rowErrors.join(", ")}');
-        } else {
-          parsed.add({
-            ...record,
-            'price': price,
-            'bedrooms': beds,
-            'bathrooms':
-                int.tryParse(record['bathrooms']?.toString() ?? '') ?? 1,
-            'toilets': int.tryParse(record['toilets']?.toString() ?? '') ?? 1,
-            '_rowNum': i + 1,
-          });
-        }
+        rows.add(_Row(
+            title.isEmpty ? '(no title)' : title,
+            area,
+            int.tryParse(cell(r, 'bedrooms')) ?? 0,
+            int.tryParse(cell(r, 'bathrooms')) ?? 0,
+            price,
+            cell(r, 'description'),
+            problem));
       }
-
-      setState(() {
-        _parsed = parsed;
-        _errors = errors;
-        _status = parsed.isEmpty
-            ? 'No valid rows found.'
-            : 'Found ${parsed.length} valid listings.${errors.isNotEmpty ? " ${errors.length} rows have errors." : ""}';
-      });
-    } catch (e) {
-      setState(() {
-        _errors = ['Failed to parse CSV: $e'];
-        _status = '';
-      });
+      setState(() => _rows = rows);
+    } catch (_) {
+      setState(() => _error =
+          'We could not read that file. Use the template and save it as CSV.');
     }
   }
 
-  Future<void> _uploadAll() async {
-    if (_parsed.isEmpty) return;
-    final user = ref.read(currentUserModelProvider).value;
-    if (user == null) return;
-
+  Future<void> _import() async {
+    final user = ref.read(currentUserModelProvider).asData?.value;
+    if (user == null) {
+      return;
+    }
+    final valid = _rows.where((r) => r.valid).toList();
     setState(() {
-      _uploading = true;
-      _uploaded = 0;
-      _failed = 0;
-      _status = 'Uploading…';
+      _busy = true;
+      _error = null;
     });
-
-    final db = FirebaseFirestore.instance;
-    const uuid = Uuid();
-
-    for (final row in _parsed) {
-      try {
-        final amenitiesCsv = row['amenities'] as String? ?? '';
-        final amenities = amenitiesCsv.isEmpty
-            ? <String>[]
-            : amenitiesCsv
-                .split(';')
-                .map((a) => a.trim())
-                .where((a) => a.isNotEmpty)
-                .toList();
-
-        final area = row['area'] as String? ?? 'Abuja';
-        // Fixes applied here (Phase 3):
-        // 1. Category was writing the raw CSV/label value straight into
-        //    Firestore ("For Rent") — the exact same bug fixed everywhere
-        //    else in Phase 1, just reintroduced by this screen writing a
-        //    hand-rolled map instead of going through ListingModel/
-        //    ListingCategory. Normalized here too.
-        // 2. Was publishing with `status: 'active'` immediately, with
-        //    zero photos (`images: []`), the moment the CSV parsed. The
-        //    review is explicit: "Do not allow bulk imports to bypass
-        //    verification, media rules, freshness, or moderation" and
-        //    "Import as drafts. Require supplier confirmation before
-        //    publishing." Every row now lands as `status: 'draft'` —
-        //    invisible to search/home/everyone but the importing agent —
-        //    until they review it and add photos from My Listings > Drafts.
-        await db.collection(AppConstants.colListings).doc(uuid.v4()).set({
-          'title': row['title'],
-          'description': row['description'] ?? '',
-          'price': row['price'],
-          'propertyType': row['property_type'] ?? 'Flat / Apartment',
-          'category': ListingCategory.fromAny(row['category'] as String?).value,
-          'bedrooms': row['bedrooms'],
-          'bathrooms': row['bathrooms'],
-          'toilets': row['toilets'],
-          'isFurnished':
-              (row['furnished'] as String? ?? '').toLowerCase() == 'yes',
-          'amenities': amenities,
-          'area': area,
-          'city': row['city'] ?? 'Abuja',
-          'location': {
-            'area': area,
-            'city': row['city'] ?? 'Abuja',
-            'state': 'FCT',
-            'country': 'Nigeria',
-            'fullAddress': '$area, ${row['city'] ?? "Abuja"}, FCT',
-            'latitude': AppConstants.abujaLat,
-            'longitude': AppConstants.abujaLng,
-            // These coordinates are the Abuja area center, not a real
-            // pin — matches the locationPrecision fix from Phase 1.
-            'locationPrecision': 'approximate',
-          },
-          'agentId': user.uid,
-          'agentName': user.name,
-          'agentPhone': user.phone,
-          'agentPhoto': user.profilePhoto ?? '',
-          'images': <String>[],
-          'status': 'draft',
-          'isVerified': false,
-          'isFeatured': false,
-          'verificationStatus': 'none',
-          'source': 'bulk_upload',
-          'viewCount': 0,
-          'inquiryCount': 0,
-          'createdAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-          'expiresAt':
-              Timestamp.fromDate(DateTime.now().add(const Duration(days: 90))),
-        });
+    try {
+      final repo = ref.read(listingRepositoryProvider);
+      final loc = LocationService();
+      for (final r in valid) {
+        final b = AreaBoundsLookup.centre(r.area);
+        final map = loc.buildLocationMap(
+            latitude: b.$1,
+            longitude: b.$2,
+            area: r.area,
+            fullAddress: '${r.area}, Abuja');
+        await repo.saveDraft(ListingModel(
+          id: '',
+          title: r.title,
+          description: r.description,
+          price: r.price,
+          propertyType: 'Flat / Apartment',
+          bedrooms: r.beds,
+          bathrooms: r.baths,
+          toilets: r.baths,
+          location: PropertyLocation.fromMap(
+              {...map, 'locationPrecision': 'approximate'}),
+          images: const [],
+          agentId: user.uid,
+          agentName: user.name,
+          agentPhone: user.phone,
+          agentPhoto: user.profilePhoto,
+          createdAt: DateTime.now(),
+        ));
+      }
+      if (!mounted) {
+        return;
+      }
+      showPsSnack(context,
+          '${valid.length} drafts created. Add media and review each before publishing.');
+      context.go('/my-listings');
+    } catch (_) {
+      if (mounted) {
         setState(() {
-          _uploaded++;
-          _status = 'Uploaded $_uploaded / ${_parsed.length}…';
+          _busy = false;
+          _error =
+              'Some drafts could not be created. Check your connection and try again.';
         });
-        // Small delay to avoid Firestore write limits
-        if (_uploaded % 10 == 0) {
-          await Future.delayed(const Duration(milliseconds: 500));
-        }
-      } catch (e) {
-        setState(() => _failed++);
       }
     }
-
-    setState(() {
-      _uploading = false;
-      _status = _failed > 0
-          ? '✅ Done! $_uploaded imported as drafts, $_failed failed.'
-          : '✅ Done! $_uploaded listings imported as drafts.';
-    });
-    if (mounted && _uploaded > 0) {
-      showDialog(
-        context: context,
-        builder: (_) => AlertDialog(
-          title: const Text('Imported as drafts'),
-          content: Text(
-              'Your $_uploaded listings were imported as drafts — they are '
-              'not visible to anyone yet. Go to My Listings > Drafts to add '
-              'photos and publish each one, or discard the ones you don\'t want.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Later'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-                context.push('/profile/listings');
-              },
-              child: const Text('Review Drafts'),
-            ),
-          ],
-        ),
-      );
-    }
-  }
-
-  void _downloadTemplate() {
-    const template =
-        'title,description,price,property_type,area,city,bedrooms,bathrooms,toilets,furnished,condition,amenities,category\n'
-        '"3 Bedroom Flat in Maitama","Spacious flat with all amenities",2500000,"Flat / Apartment","Maitama","Abuja",3,2,3,"Yes","New","Generator;AC;Borehole","For Rent"\n'
-        '"2 Bedroom Duplex Wuse 2","Modern duplex in prime location",1800000,"Duplex","Wuse 2","Abuja",2,2,2,"No","Fairly Used","Generator;Parking","For Rent"\n';
-    // Copy to clipboard (web-safe)
-    Clipboard.setData(const ClipboardData(text: template));
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text(
-            'CSV template copied to clipboard! Paste into Excel/Google Sheets.')));
   }
 
   @override
   Widget build(BuildContext context) {
+    final validCount = _rows.where((r) => r.valid).length;
     return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(
-        title: Text('Bulk Upload Listings',
-            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 760),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            // Intro card
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                    colors: [AppColors.primaryDark, AppColors.primary]),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('📋 Bulk Listing Import',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 16)),
-                    SizedBox(height: 6),
-                    Text(
-                        'Upload a CSV file with multiple properties at once. Perfect for agents with large portfolios.',
-                        style: TextStyle(
-                            color: Colors.white70, fontSize: 12, height: 1.5)),
-                    SizedBox(height: 14),
-                    Row(children: [
-                      _WhiteChip('Max 500 rows'),
-                      SizedBox(width: 8),
-                      _WhiteChip('CSV format'),
-                      SizedBox(width: 8),
-                      _WhiteChip('Starts as Unverified'),
-                    ]),
-                  ]),
-            ),
-            const SizedBox(height: 20),
-
-            // Template download
-            OutlinedButton.icon(
-              onPressed: _downloadTemplate,
-              icon: const Icon(Icons.download_rounded, size: 16),
-              label: const Text('Copy CSV Template'),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-                'Download the template, fill it in Excel or Google Sheets, then upload the .csv file.',
-                style: TextStyle(fontSize: 12, color: AppColors.text3)),
-            const SizedBox(height: 20),
-
-            // Column guide
-            _ColumnGuide(),
-            const SizedBox(height: 20),
-
-            // Upload area
-            GestureDetector(
-              onTap: _uploading ? null : _pickCSV,
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 32),
-                decoration: BoxDecoration(
-                  color: _parsed.isNotEmpty
-                      ? AppColors.primaryPale
-                      : AppColors.surface,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: _parsed.isNotEmpty
-                        ? AppColors.primary
-                        : AppColors.border,
-                    width: _parsed.isNotEmpty ? 2 : 1,
-                    style: BorderStyle.solid,
-                  ),
-                ),
-                child: Column(children: [
-                  Icon(
-                    _parsed.isNotEmpty
-                        ? Icons.check_circle_rounded
-                        : Icons.upload_file_rounded,
-                    size: 44,
-                    color: _parsed.isNotEmpty
-                        ? AppColors.primary
-                        : AppColors.text3,
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    _parsed.isNotEmpty
-                        ? '${_parsed.length} listings ready to upload'
-                        : 'Tap to select CSV file',
-                    style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 15,
-                        color: _parsed.isNotEmpty
-                            ? AppColors.primary
-                            : AppColors.text2),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                      _status.isEmpty
-                          ? 'Supported: .csv files up to 5MB'
-                          : _status,
-                      style: const TextStyle(
-                          fontSize: 12, color: AppColors.text3)),
-                ]),
-              ),
-            ),
-
-            // Errors
-            if (_errors.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: AppColors.error.withOpacity(0.07),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.error.withOpacity(0.2)),
-                ),
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                          '${_errors.length} row error${_errors.length > 1 ? "s" : ""} found:',
-                          style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.error,
-                              fontSize: 13)),
-                      const SizedBox(height: 8),
-                      ..._errors.take(5).map((e) => Padding(
-                            padding: const EdgeInsets.only(bottom: 4),
-                            child: Row(children: [
-                              const Icon(Icons.close_rounded,
-                                  size: 13, color: AppColors.error),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                  child: Text(e,
-                                      style: const TextStyle(
-                                          fontSize: 12,
-                                          color: AppColors.error))),
-                            ]),
-                          )),
-                      if (_errors.length > 5)
-                        Text('… and ${_errors.length - 5} more',
-                            style: const TextStyle(
-                                fontSize: 11, color: AppColors.text3)),
-                    ]),
-              ),
-            ],
-
-            // Preview table
-            if (_parsed.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              Text('Preview (first 5 rows)',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              _PreviewTable(rows: _parsed.take(5).toList()),
-            ],
-
-            // Upload button
-            if (_parsed.isNotEmpty && !_uploading) ...[
-              const SizedBox(height: 20),
-              Row(children: [
+      backgroundColor: AppColors.surface,
+      appBar: const PsTopBar(title: 'Import listings'),
+      body: Column(children: [
+        Expanded(
+            child: ListView(padding: kPagePadding, children: [
+          const PsHeadline('Add several homes', accent: 'at once.', size: 34),
+          const SizedBox(height: 8),
+          Text('Import into drafts. Review before publishing.',
+              style: AppText.bodyMuted),
+          const SizedBox(height: 16),
+          PsCard(
+              onTap: _pick,
+              semanticLabel: 'Choose CSV file',
+              child: Row(children: [
+                const Icon(Icons.insert_drive_file_outlined,
+                    size: 40, color: AppColors.primary),
+                const SizedBox(width: 16),
                 Expanded(
-                    child: ElevatedButton.icon(
-                  onPressed: _uploadAll,
-                  icon: const Icon(Icons.cloud_upload_rounded, size: 18),
-                  label: Text('Upload ${_parsed.length} Listings',
-                      style: GoogleFonts.plusJakartaSans(
-                          fontWeight: FontWeight.w800, fontSize: 14)),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 15),
-                    backgroundColor: AppColors.primary,
-                  ),
-                )),
-              ]),
-              const SizedBox(height: 8),
-              const Text(
-                  'All imported listings will be marked "Unverified" until reviewed.',
-                  style: TextStyle(fontSize: 11, color: AppColors.text3)),
-            ],
-
-            // Progress
-            if (_uploading) ...[
-              const SizedBox(height: 20),
-              LinearProgressIndicator(
-                value: _parsed.isNotEmpty ? _uploaded / _parsed.length : null,
-                color: AppColors.primary,
-                backgroundColor: AppColors.border,
-              ),
-              const SizedBox(height: 8),
-              Text(_status,
-                  style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.primary)),
-            ],
-
-            const SizedBox(height: 80),
-          ]),
-        ),
-      ),
-    );
-  }
-}
-
-class _WhiteChip extends StatelessWidget {
-  final String label;
-  const _WhiteChip(this.label);
-  @override
-  Widget build(BuildContext context) => Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.2),
-          borderRadius: BorderRadius.circular(99)),
-      child: Text(label,
-          style: const TextStyle(
-              color: Colors.white, fontSize: 10, fontWeight: FontWeight.w600)));
-}
-
-class _ColumnGuide extends StatelessWidget {
-  static const _cols = [
-    ('title*', 'Property title', 'String'),
-    ('price*', 'Annual rent in ₦', 'Number'),
-    ('property_type*', 'Flat / Apartment, Duplex…', 'String'),
-    ('area*', 'Wuse 2, Maitama…', 'String'),
-    ('bedrooms*', 'Number of bedrooms', 'Integer'),
-    ('bathrooms*', 'Number of bathrooms', 'Integer'),
-    ('description', 'Property description', 'String'),
-    ('city', 'Abuja, Lagos…', 'String'),
-    ('toilets', 'Number of toilets', 'Integer'),
-    ('furnished', 'Yes or No', 'String'),
-    ('condition', 'New, Fairly Used, Old', 'String'),
-    ('amenities', 'Semicolon separated', 'String'),
-    ('category', 'For Rent, For Sale…', 'String'),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.border)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Padding(
-            padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
-            child: Text('CSV Column Reference',
-                style: Theme.of(context).textTheme.titleSmall)),
-        const Divider(height: 1),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: DataTable(
-            headingRowHeight: 36,
-            dataRowMinHeight: 32,
-            dataRowMaxHeight: 40,
-            columnSpacing: 20,
-            columns: const [
-              DataColumn(
-                  label: Text('Column',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w800, fontSize: 11))),
-              DataColumn(
-                  label: Text('Description',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w800, fontSize: 11))),
-              DataColumn(
-                  label: Text('Type',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w800, fontSize: 11))),
-            ],
-            rows: _cols.map((c) {
-              final (col, desc, type) = c;
-              final required = col.endsWith('*');
-              return DataRow(cells: [
-                DataCell(Text(col,
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: required ? AppColors.primary : AppColors.text))),
-                DataCell(Text(desc, style: const TextStyle(fontSize: 11))),
-                DataCell(Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                        color: AppColors.bg,
-                        borderRadius: BorderRadius.circular(4)),
-                    child: Text(type,
-                        style: const TextStyle(
-                            fontSize: 10,
-                            color: AppColors.text2,
-                            fontFamily: 'monospace')))),
-              ]);
-            }).toList(),
-          ),
-        ),
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      Text('Choose CSV file', style: AppText.h3),
+                      Text('Select a file from your device',
+                          style: AppText.small)
+                    ])),
+                const Icon(Icons.chevron_right_rounded),
+              ])),
+          const SizedBox(height: 10),
+          PsLink('Download template', onTap: () async {
+            await Clipboard.setData(const ClipboardData(text: _template));
+            if (context.mounted)
+              showPsSnack(context,
+                  'Template copied. Paste it into a spreadsheet and save as CSV.');
+          }),
+          if (_rows.isNotEmpty) ...[
+            const SizedBox(height: 20),
+            Text('Preview', style: AppText.h2),
+            const SizedBox(height: 10),
+            PsCard(
+                padding: EdgeInsets.zero,
+                child: Column(children: [
+                  for (final r in _rows.take(30))
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: const BoxDecoration(
+                          border: Border(
+                              bottom: BorderSide(color: AppColors.border))),
+                      child: Row(children: [
+                        Expanded(
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                              Text('${r.title} · ${r.area}',
+                                  style: AppText.title,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis),
+                              Text(
+                                  '${r.beds} beds · ${r.baths} baths${r.price > 0 ? ' · ${Money.short(r.price.round())}' : ''}',
+                                  style: AppText.small),
+                            ])),
+                        const SizedBox(width: 8),
+                        PsPill(r.valid ? 'Ready as draft' : r.problem!,
+                            tone: r.valid ? PsTone.success : PsTone.warning,
+                            icon: r.valid
+                                ? Icons.check_circle_rounded
+                                : Icons.error_outline_rounded,
+                            small: true),
+                      ]),
+                    ),
+                  Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Row(children: [
+                        const Icon(Icons.info_outline_rounded,
+                            size: 18, color: AppColors.text2),
+                        const SizedBox(width: 8),
+                        Expanded(
+                            child: Text(
+                                'Imported text does not verify a property. Drafts still need photos or video.',
+                                style: AppText.small))
+                      ])),
+                ])),
+          ],
+          if (_error != null)
+            Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(_error!,
+                    style: AppText.small.copyWith(
+                        color: AppColors.error, fontWeight: FontWeight.w600))),
+          const SizedBox(height: 12),
+          PsCard(
+              onTap: () => context.push('/whatsapp-assist'),
+              semanticLabel: 'Import from WhatsApp instead',
+              child: Row(children: [
+                const Icon(Icons.chat_rounded,
+                    size: 32, color: AppColors.primary),
+                const SizedBox(width: 14),
+                Expanded(
+                    child: Text('Import from WhatsApp instead',
+                        style: AppText.title)),
+                const Icon(Icons.chevron_right_rounded),
+              ])),
+        ])),
+        PsBottomBar(row: false, children: [
+          PsButton(
+              _rows.isEmpty
+                  ? 'Import drafts'
+                  : 'Import $validCount valid draft${validCount == 1 ? '' : 's'}',
+              loading: _busy,
+              onPressed: validCount == 0 ? null : _import),
+          Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                  'This will only create drafts. You can review and edit before publishing.',
+                  textAlign: TextAlign.center,
+                  style: AppText.caption)),
+        ]),
       ]),
     );
-  }
-}
-
-class _PreviewTable extends StatelessWidget {
-  final List<Map<String, dynamic>> rows;
-  const _PreviewTable({required this.rows});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.border)),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: DataTable(
-          headingRowHeight: 36,
-          dataRowMinHeight: 36,
-          dataRowMaxHeight: 44,
-          columnSpacing: 16,
-          columns: const [
-            DataColumn(
-                label: Text('Title',
-                    style:
-                        TextStyle(fontWeight: FontWeight.w800, fontSize: 11))),
-            DataColumn(
-                label: Text('Area',
-                    style:
-                        TextStyle(fontWeight: FontWeight.w800, fontSize: 11))),
-            DataColumn(
-                label: Text('Price',
-                    style:
-                        TextStyle(fontWeight: FontWeight.w800, fontSize: 11))),
-            DataColumn(
-                label: Text('Beds',
-                    style:
-                        TextStyle(fontWeight: FontWeight.w800, fontSize: 11))),
-            DataColumn(
-                label: Text('Type',
-                    style:
-                        TextStyle(fontWeight: FontWeight.w800, fontSize: 11))),
-          ],
-          rows: rows
-              .map((row) => DataRow(cells: [
-                    DataCell(SizedBox(
-                        width: 160,
-                        child: Text(row['title']?.toString() ?? '',
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 11)))),
-                    DataCell(Text(row['area']?.toString() ?? '',
-                        style: const TextStyle(fontSize: 11))),
-                    DataCell(Text('₦${_fmt(row['price'])}',
-                        style: const TextStyle(
-                            fontSize: 11,
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.w700))),
-                    DataCell(Text(row['bedrooms']?.toString() ?? '',
-                        style: const TextStyle(fontSize: 11))),
-                    DataCell(Text(row['property_type']?.toString() ?? '',
-                        style: const TextStyle(fontSize: 11))),
-                  ]))
-              .toList(),
-        ),
-      ),
-    );
-  }
-
-  String _fmt(dynamic price) {
-    final p = (price as num?)?.toDouble() ?? 0;
-    if (p >= 1000000) return '${(p / 1000000).toStringAsFixed(1)}M';
-    if (p >= 1000) return '${(p / 1000).toStringAsFixed(0)}k';
-    return '${p.toStringAsFixed(0)}';
   }
 }

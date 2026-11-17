@@ -1,531 +1,199 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../../../core/constants/app_theme.dart';
-import '../../../core/utils/listing_ranking.dart';
+import '../../../core/utils/freshness.dart';
+import '../../../core/utils/move_in_cost.dart';
 import '../../../core/widgets/common_widgets.dart';
 import '../../../data/models/listing_model.dart';
+import '../../providers/actions.dart';
 import '../../providers/app_providers.dart';
 
-/// Replaces the old `/profile/listings` route, which built
-/// `SavedListingsScreen` — an agent's own inventory has nothing to do with
-/// what they've bookmarked from other agents. Backed by
-/// `agentListingsProvider`, which Phase 2 also fixed to stop hard-filtering
-/// to `status == 'active'` (an owner couldn't previously see their own
-/// paused or archived listings here at all).
-///
-/// Phase 2 additions on top of the Phase 1 version: status tabs (so
-/// archived listings have somewhere to live, with a Restore action),
-/// a completeness score per listing, and trust/boost/premium badges —
-/// this is the "supplier dashboard" foundation the review asked for.
-/// Still deferred: response-rate/enquiry analytics, bulk actions — those
-/// need the analytics-event and enquiry-model work from later in Phase 2/3.
+/// My listings: Active · Drafts · Paused · Archived. Includes the
+/// availability-refresh queue and Mark rented. Nobody has to delete a home
+/// just to stop enquiries; pause or mark rented instead.
 class AgentListingsScreen extends ConsumerStatefulWidget {
   const AgentListingsScreen({super.key});
   @override
-  ConsumerState<AgentListingsScreen> createState() => _AgentListingsScreenState();
+  ConsumerState<AgentListingsScreen> createState() => _State();
 }
 
-class _AgentListingsScreenState extends ConsumerState<AgentListingsScreen> {
-  String _tab = 'active'; // 'active' | 'paused' | 'draft' | 'archived'
+class _State extends ConsumerState<AgentListingsScreen> {
+  int _tab = 0;
+  static const _tabs = ['Active', 'Drafts', 'Paused', 'Archived'];
 
-  @override
-  Widget build(BuildContext context) {
-    final userId = ref.watch(currentUserIdProvider);
-
-    if (userId == null) {
-      return Scaffold(
-        appBar: AppBar(
-            title: Text('My Listings',
-                style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700))),
-        body: EmptyState(
-          icon: Icons.home_work_outlined,
-          title: 'Manage your properties',
-          subtitle: 'Sign in to see and manage the listings you\'ve posted.',
-          action: ElevatedButton(
-            onPressed: () => context.push('/auth?redirect=/profile/listings'),
-            child: const Text('Sign In'),
-          ),
-        ),
-      );
+  bool _inTab(ListingModel l) {
+    switch (_tab) {
+      case 0:
+        return l.isLive;
+      case 1:
+        return l.isDraft;
+      case 2:
+        return l.status == 'paused';
+      default:
+        return l.status == 'archived' || l.status == 'rented';
     }
+  }
 
-    final listingsAsync = ref.watch(agentListingsProvider(userId));
-    final user = ref.watch(currentUserModelProvider).value;
-
-    return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(
-        title: Text('My Listings',
-            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add_rounded),
-            tooltip: 'Add property',
-            onPressed: () => context.push('/listing/upload'),
-          ),
-        ],
-      ),
-      body: listingsAsync.when(
-        data: (all) {
-          if (all.isEmpty) {
-            return EmptyState(
-              icon: Icons.home_work_outlined,
-              title: 'No listings yet',
-              subtitle: 'Post your first property to start getting enquiries.',
-              action: ElevatedButton(
-                onPressed: () => context.push('/listing/upload'),
-                child: const Text('List a Property'),
-              ),
-            );
-          }
-
-          final active = all.where((l) => l.status == 'active').toList();
-          final paused = all.where((l) => l.status == 'paused').toList();
-          final drafts = all.where((l) => l.status == 'draft').toList();
-          final archived = all.where((l) => l.status == 'archived').toList();
-          final shown = switch (_tab) {
-            'paused' => paused,
-            'draft' => drafts,
-            'archived' => archived,
-            _ => active,
-          };
-
-          return Column(children: [
-            // ── Trust/entitlement status row ──
-            if (user != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 14, 14, 0),
-                child: _AgentStatusRow(
-                  verificationStatus: user.verificationStatus,
-                  isPremium: user.isPremium,
-                  premiumPlan: user.premiumPlan,
-                ),
-              ),
-            // ── Bulk-import drafts banner — surfaces the moment there's
-            // something waiting on the agent, since drafts are otherwise
-            // invisible everywhere else in the app by design. ──
-            if (drafts.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
-                child: GestureDetector(
-                  onTap: () => setState(() => _tab = 'draft'),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: AppColors.info.withOpacity(0.08),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.info.withOpacity(0.25)),
-                    ),
-                    child: Row(children: [
-                      const Icon(Icons.drafts_outlined, size: 16, color: AppColors.info),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          '${drafts.length} imported listing${drafts.length == 1 ? '' : 's'} waiting for photos before they can go live',
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.info),
-                        ),
-                      ),
-                      const Icon(Icons.chevron_right_rounded, size: 16, color: AppColors.info),
-                    ]),
-                  ),
-                ),
-              ),
-            Padding(
-              padding: const EdgeInsets.all(14),
-              child: Row(children: [
-                Expanded(child: _StatCard(label: 'Active', value: '${active.length}', color: AppColors.success)),
-                const SizedBox(width: 10),
-                Expanded(child: _StatCard(label: 'Paused', value: '${paused.length}', color: AppColors.gold)),
-                const SizedBox(width: 10),
-                Expanded(child: _StatCard(label: 'Archived', value: '${archived.length}', color: AppColors.text3)),
-              ]),
-            ),
-            // ── Tabs ──
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              child: Row(
-                children: [
-                  _TabChip(label: 'Active (${active.length})', selected: _tab == 'active', onTap: () => setState(() => _tab = 'active')),
-                  const SizedBox(width: 8),
-                  _TabChip(label: 'Paused (${paused.length})', selected: _tab == 'paused', onTap: () => setState(() => _tab = 'paused')),
-                  const SizedBox(width: 8),
-                  _TabChip(label: 'Drafts (${drafts.length})', selected: _tab == 'draft', onTap: () => setState(() => _tab = 'draft')),
-                  const SizedBox(width: 8),
-                  _TabChip(label: 'Archived (${archived.length})', selected: _tab == 'archived', onTap: () => setState(() => _tab = 'archived')),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: shown.isEmpty
-                  ? Center(
-                      child: Text('No ${_tab == 'draft' ? 'draft' : _tab} listings',
-                          style: const TextStyle(color: AppColors.text3)),
-                    )
-                  : ListView(
-                      padding: const EdgeInsets.fromLTRB(14, 0, 14, 20),
-                      children: shown
-                          .map((l) => _AgentListingRow(
-                                listing: l,
-                                onEdit: () => context.push('/listing/edit/${l.id}'),
-                                onView: () => context.push('/listing/${l.id}'),
-                                onTogglePause: () async {
-                                  final repo = ref.read(listingRepositoryProvider);
-                                  final next = l.status == 'active' ? 'paused' : 'active';
-                                  try {
-                                    await repo.updateStatus(l.id, next);
-                                  } catch (e) {
-                                    // Friendly message instead of the raw
-                                    // exception (which for a Firestore
-                                    // error reads like
-                                    // "[cloud_firestore/permission-denied]
-                                    // Missing or insufficient permissions.").
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                                          content: Text('Couldn\'t update this listing. Please try again.')));
-                                    }
-                                  }
-                                },
-                                onArchive: () => ref
-                                    .read(listingRepositoryProvider)
-                                    .archiveListing(l.id, userId),
-                                onRestore: () => ref
-                                    .read(listingRepositoryProvider)
-                                    .restoreListing(l.id),
-                                // Publishing a draft (Phase 3 bulk-import
-                                // flow) requires at least one photo — the
-                                // same bar every other listing had to
-                                // clear before it could go live. If there
-                                // are none yet, send them to Edit instead
-                                // of silently failing.
-                                onPublish: () async {
-                                  if (l.images.isEmpty) {
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                                          content: Text('Add at least one photo before publishing.')));
-                                    }
-                                    context.push('/listing/edit/${l.id}');
-                                    return;
-                                  }
-                                  try {
-                                    await ref.read(listingRepositoryProvider).updateStatus(l.id, 'active');
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text('Published!'), backgroundColor: AppColors.success));
-                                    }
-                                  } catch (e) {
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                                          content: Text('Couldn\'t publish this listing. Please try again.')));
-                                    }
-                                  }
-                                },
-                                onDeletePermanently: () async {
-                                  final confirmed = await showDialog<bool>(
-                                    context: context,
-                                    builder: (_) => AlertDialog(
-                                      title: Text(l.status == 'draft' ? 'Discard draft?' : 'Delete permanently?'),
-                                      content: Text(l.status == 'draft'
-                                          ? 'This imported row will be removed.'
-                                          : 'This cannot be undone — the listing and its data will be gone for good.'),
-                                      actions: [
-                                        TextButton(
-                                            onPressed: () => Navigator.pop(context, false),
-                                            child: const Text('Cancel')),
-                                        TextButton(
-                                            onPressed: () => Navigator.pop(context, true),
-                                            child: Text(l.status == 'draft' ? 'Discard' : 'Delete',
-                                                style: const TextStyle(color: AppColors.error))),
-                                      ],
-                                    ),
-                                  );
-                                  if (confirmed == true) {
-                                    await ref
-                                        .read(listingRepositoryProvider)
-                                        .deleteListingPermanently(l.id, userId);
-                                  }
-                                },
-                              ))
-                          .toList(),
-                    ),
-            ),
-          ]);
-        },
-        // Was a bare spinner — now a shaped skeleton list matching the
-        // eventual row layout, same fix applied to Chat/Notifications
-        // already had, extended here for consistency.
-        loading: () => ListView.separated(
-          padding: const EdgeInsets.all(14),
-          itemCount: 5,
-          separatorBuilder: (_, __) => const SizedBox(height: 10),
-          itemBuilder: (_, __) => const SkeletonListTile(),
-        ),
-        // Friendly failure state instead of the raw exception — this one
-        // was missed in the earlier pass because it used the "Error: $e"
-        // phrasing rather than the bare "$e" pattern I was grepping for
-        // at the time; caught now on a full project-wide re-sweep.
-        error: (e, _) => const Center(
-          child: Padding(
-            padding: EdgeInsets.all(24),
-            child: Text('Couldn\'t load your listings right now.',
-                style: TextStyle(fontSize: 13, color: AppColors.text3)),
-          ),
-        ),
-      ),
+  Future<void> _publish(ListingModel l) async {
+    var ok = false;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(builder: (c, set) => AlertDialog(
+        title: const Text('Go live?'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Renters will see this home and the date you confirm it is available.'),
+          CheckboxListTile(contentPadding: EdgeInsets.zero, controlAffinity: ListTileControlAffinity.leading, value: ok, onChanged: (v) => set(() => ok = v ?? false), title: const Text('This home is available today.')),
+        ]),
+        actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Not yet')), TextButton(onPressed: ok ? () => Navigator.pop(c, true) : null, child: const Text('Go live'))],
+      )),
     );
+    if (go == true && mounted) {
+      await runAction(context, () => ref.read(functionsServiceProvider).publishListing(l.id), success: 'Your home is live.');
+    }
   }
-}
 
-/// A rough 0-100% completeness score computed purely from what's already
-/// on the model — no new fields needed. Used to nudge agents toward
-/// listings that will actually rank and convert, per the review's
-/// "listing completeness score" ask for the supplier dashboard.
-// listingCompletenessScore now lives in core/utils/listing_ranking.dart so
-// listing_repository.dart's ranking and this dashboard use the exact same
-// definition of "complete" — see that file for the scoring breakdown.
-
-class _AgentStatusRow extends StatelessWidget {
-  final VerificationStatus verificationStatus;
-  final bool isPremium;
-  final String? premiumPlan;
-  const _AgentStatusRow(
-      {required this.verificationStatus, required this.isPremium, this.premiumPlan});
+  Future<void> _status(ListingModel l, String status, String done) =>
+      runAction(context, () => ref.read(functionsServiceProvider).setListingStatus(l.id, status), success: done);
 
   @override
   Widget build(BuildContext context) {
-    final verified = verificationStatus == VerificationStatus.approved;
-    return Row(children: [
-      Expanded(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: verified ? AppColors.success.withOpacity(0.1) : AppColors.bg,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: verified ? AppColors.success.withOpacity(0.3) : AppColors.border),
-          ),
-          child: Row(children: [
-            Icon(verified ? Icons.verified_rounded : Icons.pending_outlined,
-                size: 16, color: verified ? AppColors.success : AppColors.text3),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                verified
-                    ? 'Verified agent'
-                    : verificationStatus == VerificationStatus.pending
-                        ? 'Verification pending'
-                        : 'Not verified yet',
-                style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: verified ? AppColors.success : AppColors.text2),
-              ),
-            ),
+    final uid = ref.watch(currentUserIdProvider);
+    final async = uid == null ? null : ref.watch(agentListingsProvider(uid));
+    return Scaffold(
+      backgroundColor: AppColors.surface,
+      body: ListView(padding: EdgeInsets.zero, children: [
+        PsGreenHeader(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [const PropsureLogo(light: true, size: 30), const Spacer(), PsButton('Add', expand: false, kind: PsButtonKind.ghost, icon: Icons.add_circle_outline_rounded, onPressed: () => context.push('/listing/new'))]),
+            const SizedBox(height: 12),
+            Text('My listings', style: AppText.display.copyWith(color: Colors.white)),
           ]),
         ),
-      ),
-      if (isPremium) ...[
-        const SizedBox(width: 8),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: AppColors.gold.withOpacity(0.12),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.gold.withOpacity(0.3)),
-          ),
-          child: Row(children: [
-            const Icon(Icons.workspace_premium_rounded, size: 16, color: AppColors.gold),
-            const SizedBox(width: 6),
-            Text(premiumPlan == 'agent_elite' ? 'Elite' : 'Pro',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.gold)),
+        Padding(
+          padding: kPagePadding,
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const SizedBox(height: 16),
+            SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [for (var i = 0; i < _tabs.length; i++) Padding(padding: const EdgeInsets.only(right: 8), child: PsChip(_tabs[i], selected: _tab == i, onTap: () => setState(() => _tab = i)))])),
+            const SizedBox(height: 16),
+            if (async == null)
+              const PsEmpty(icon: Icons.lock_outline_rounded, title: 'Sign in', message: 'Sign in to manage your listings.')
+            else
+              async.when(
+                loading: () => const Column(children: [PsListingSkeleton()]),
+                error: (_, __) => PsError(onRetry: () => ref.invalidate(agentListingsProvider(uid!))),
+                data: (all) {
+                  final list = all.where(_inTab).toList();
+                  if (list.isEmpty) {
+                    return PsEmpty(icon: Icons.home_work_outlined, title: 'Nothing in ${_tabs[_tab].toLowerCase()}', message: _tab == 1 ? 'Drafts you start will wait here until you publish.' : 'Add a video listing to get started.', actionLabel: 'Add a home', onAction: () => context.push('/listing/new'));
+                  }
+                  return Column(children: [for (final l in list) _Card(l: l, tab: _tab, onPublish: () => _publish(l), onStatus: (s, m) => _status(l, s, m))]);
+                },
+              ),
+            const SizedBox(height: 24),
           ]),
         ),
-      ],
-    ]);
-  }
-}
-
-class _TabChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  const _TabChip({required this.label, required this.selected, required this.onTap});
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: selected ? AppColors.primary : AppColors.surface,
-            borderRadius: BorderRadius.circular(99),
-            border: Border.all(color: selected ? AppColors.primary : AppColors.border),
-          ),
-          child: Text(label,
-              style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: selected ? Colors.white : AppColors.text2)),
-        ),
-      );
-}
-
-class _StatCard extends StatelessWidget {
-  final String label, value;
-  final Color? color;
-  const _StatCard({required this.label, required this.value, this.color});
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Column(children: [
-          Text(value,
-              style: GoogleFonts.plusJakartaSans(
-                  fontSize: 20, fontWeight: FontWeight.w800, color: color ?? AppColors.text)),
-          const SizedBox(height: 2),
-          Text(label, style: const TextStyle(fontSize: 11, color: AppColors.text3)),
-        ]),
-      );
-}
-
-class _AgentListingRow extends StatelessWidget {
-  final ListingModel listing;
-  final VoidCallback onEdit, onView, onTogglePause, onArchive, onRestore, onPublish, onDeletePermanently;
-  const _AgentListingRow({
-    required this.listing,
-    required this.onEdit,
-    required this.onView,
-    required this.onTogglePause,
-    required this.onArchive,
-    required this.onRestore,
-    required this.onPublish,
-    required this.onDeletePermanently,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isPaused = listing.status == 'paused';
-    final isArchived = listing.status == 'archived';
-    final isDraft = listing.status == 'draft';
-    final score = listingCompletenessScore(listing);
-    final now = DateTime.now();
-    final isStale = listing.updatedAt != null && now.difference(listing.updatedAt!).inDays > 30;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(children: [
-        Row(children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: SizedBox(
-              width: 56,
-              height: 56,
-              child: listing.images.isNotEmpty
-                  ? Image.network(listing.images.first, fit: BoxFit.cover)
-                  : Container(color: AppColors.bg, child: const Icon(Icons.home_outlined, color: AppColors.text3)),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: GestureDetector(
-              onTap: onView,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(listing.title, maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-                  const SizedBox(height: 3),
-                  Text(listing.formattedPriceWithPeriod,
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.primary)),
-                  const SizedBox(height: 4),
-                  Wrap(spacing: 6, runSpacing: 4, children: [
-                    _Badge(
-                      text: isDraft ? 'Draft' : (isArchived ? 'Archived' : (isPaused ? 'Paused' : 'Active')),
-                      color: isDraft ? AppColors.info : (isArchived ? AppColors.text3 : (isPaused ? AppColors.gold : AppColors.success)),
-                    ),
-                    if (listing.isFeatured) const _Badge(text: '⭐ Featured', color: AppColors.gold),
-                    if (listing.verificationStatus == VerificationStatus.approved)
-                      const _Badge(text: '✓ Verified', color: AppColors.success),
-                    if (isStale && !isArchived && !isDraft) const _Badge(text: 'Stale · 30d+', color: AppColors.error),
-                    if (isDraft && listing.images.isEmpty) const _Badge(text: 'Needs photos', color: AppColors.error),
-                  ]),
-                ],
-              ),
-            ),
-          ),
-          if (isDraft)
-            ElevatedButton(
-              onPressed: onPublish,
-              style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  minimumSize: Size.zero),
-              child: const Text('Publish', style: TextStyle(fontSize: 12)),
-            ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert_rounded, color: AppColors.text3),
-            onSelected: (v) {
-              if (v == 'edit') onEdit();
-              if (v == 'pause') onTogglePause();
-              if (v == 'archive') onArchive();
-              if (v == 'restore') onRestore();
-              if (v == 'delete') onDeletePermanently();
-            },
-            itemBuilder: (_) => [
-              if (!isArchived) const PopupMenuItem(value: 'edit', child: Text('Edit')),
-              if (!isArchived && !isDraft)
-                PopupMenuItem(value: 'pause', child: Text(isPaused ? 'Republish' : 'Pause')),
-              if (!isArchived && !isDraft) const PopupMenuItem(value: 'archive', child: Text('Archive')),
-              if (isArchived) const PopupMenuItem(value: 'restore', child: Text('Restore')),
-              PopupMenuItem(
-                  value: 'delete',
-                  child: Text(isDraft ? 'Discard' : 'Delete Permanently', style: const TextStyle(color: AppColors.error))),
-            ],
-          ),
-        ]),
-        if (!isArchived) ...[
-          const SizedBox(height: 10),
-          Row(children: [
-            Expanded(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(99),
-                child: LinearProgressIndicator(
-                  value: score / 100,
-                  minHeight: 5,
-                  backgroundColor: AppColors.bg,
-                  valueColor: AlwaysStoppedAnimation<Color>(
-                      score >= 80 ? AppColors.success : (score >= 50 ? AppColors.gold : AppColors.error)),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text('$score% complete', style: const TextStyle(fontSize: 10, color: AppColors.text3)),
-          ]),
-        ],
       ]),
     );
   }
 }
 
-class _Badge extends StatelessWidget {
-  final String text;
-  final Color color;
-  const _Badge({required this.text, required this.color});
+class _Card extends ConsumerWidget {
+  final ListingModel l;
+  final int tab;
+  final VoidCallback onPublish;
+  final Future<void> Function(String, String) onStatus;
+  const _Card({required this.l, required this.tab, required this.onPublish, required this.onStatus});
+
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(99)),
-        child: Text(text, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: color)),
-      );
+  Widget build(BuildContext context, WidgetRef ref) {
+    final f = freshnessOf(l);
+    final cost = MoveInBreakdown.of(l);
+    final needsRefresh = l.isLive && (f.state == Freshness.needsRefresh || f.state == Freshness.stale || f.state == Freshness.unknown);
+    final missingCosts = l.categoryEnum.hasMoveInCost && l.charges.isEmpty;
+
+    Widget status;
+    if (l.isDraft) {
+      status = PsPill(missingCosts ? 'Draft · missing move-in costs' : 'Draft', tone: missingCosts ? PsTone.warning : PsTone.neutral, small: true);
+    } else if (f.state == Freshness.stale) {
+      status = const PsPill('Hidden: confirm availability', tone: PsTone.danger, small: true);
+    } else if (needsRefresh) {
+      status = const PsPill('Refresh due', tone: PsTone.warning, icon: Icons.error_outline_rounded, small: true);
+    } else if (l.isLive) {
+      status = const PsPill('Active', small: true);
+    } else {
+      status = PsPill(l.status == 'rented' ? 'Rented' : l.status == 'paused' ? 'Paused' : 'Archived', tone: PsTone.neutral, small: true);
+    }
+
+    Widget primary;
+    if (l.isDraft) {
+      primary = Row(mainAxisSize: MainAxisSize.min, children: [
+        PsButton('Finish draft', expand: false, kind: PsButtonKind.outline, onPressed: () => context.push('/listing/edit/${l.id}')),
+        const SizedBox(width: 8),
+        PsButton('Publish', expand: false, onPressed: onPublish),
+      ]);
+    } else if (needsRefresh) {
+      primary = PsButton('Confirm availability', expand: false, icon: Icons.check_circle_outline_rounded, onPressed: () => runAction(context, () => ref.read(functionsServiceProvider).confirmAvailability(l.id), success: 'Availability confirmed today.'));
+    } else if (l.isLive) {
+      primary = PsButton('Mark rented', expand: false, kind: PsButtonKind.outline, onPressed: () => onStatus('rented', 'Marked as rented.'));
+    } else {
+      primary = PsButton('Resume', expand: false, kind: PsButtonKind.outline, onPressed: () async {
+        await runAction(context, () => ref.read(functionsServiceProvider).publishListing(l.id), success: 'Back live. Availability confirmed today.');
+      });
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: PsCard(
+        padding: const EdgeInsets.all(14),
+        child: Column(children: [
+          InkWell(
+            onTap: () => l.isLive ? context.push('/listing/${l.id}') : context.push('/listing/edit/${l.id}'),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              SizedBox(width: 110, height: 110, child: PsNetImage(l.coverUrl, radius: BorderRadius.circular(12))),
+              const SizedBox(width: 14),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('${l.title}', maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title),
+                const SizedBox(height: 4),
+                Text(l.priceLabel, style: AppText.h3.copyWith(color: AppColors.primary)),
+                const SizedBox(height: 6),
+                status,
+                const SizedBox(height: 6),
+                if (l.isLive) Text(f.confirmedLabel == 'Not confirmed' ? 'Availability not confirmed' : 'Availability ${f.confirmedLabel.toLowerCase()}', style: AppText.caption),
+                if (l.isSponsored) Text('Sponsored until ${l.featuredUntil?.day}/${l.featuredUntil?.month}', style: AppText.caption.copyWith(color: AppColors.goldDark)),
+                if (l.categoryEnum.hasMoveInCost && l.charges.isNotEmpty) Text(cost.cardLabel, style: AppText.caption),
+              ])),
+            ]),
+          ),
+          if (l.videoStatus == VideoStatus.needsReview)
+            Padding(padding: const EdgeInsets.only(top: 10), child: PsNote('Your video frames are ready to review.', icon: Icons.photo_library_outlined, tone: PsTone.warning)),
+          const Divider(height: 24),
+          Row(children: [
+            PsLink('Edit', onTap: () => context.push('/listing/edit/${l.id}')),
+            const SizedBox(width: 12),
+            if (l.videoStatus == VideoStatus.needsReview) PsLink('Review frames', onTap: () => context.push('/listing/${l.id}/frames')) else PsLink('Share', onTap: () async { await Clipboard.setData(ClipboardData(text: 'https://propsure.africa/l/${l.id}')); if (context.mounted) showPsSnack(context, 'Link copied.'); }),
+            const Spacer(),
+            Flexible(child: primary),
+          ]),
+          if (l.isLive || l.status == 'paused')
+            Align(alignment: Alignment.centerRight, child: PopupMenuButton<String>(
+              tooltip: 'More actions',
+              onSelected: (v) {
+                if (v == 'pause') onStatus('paused', 'Paused. Renters no longer see it.');
+                if (v == 'archive') onStatus('archived', 'Archived.');
+                if (v == 'boost') context.push('/payment/boost/${l.id}');
+              },
+              itemBuilder: (_) => [
+                if (l.isLive) const PopupMenuItem(value: 'boost', child: Text('Promote (Sponsored)')),
+                if (l.isLive) const PopupMenuItem(value: 'pause', child: Text('Pause listing')),
+                const PopupMenuItem(value: 'archive', child: Text('Archive')),
+              ],
+              child: const Padding(padding: EdgeInsets.all(8), child: Text('More…')),
+            )),
+        ]),
+      ),
+    );
+  }
 }

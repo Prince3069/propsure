@@ -1,0 +1,3 @@
+{ "name": "propsure-media-worker", "version": "1.0.0", "main": "server.js", "private": true,
+  "scripts": { "test": "node test_analyze.js", "start": "node server.js" },
+  "dependencies": { "firebase-admin": "^12.1.0" }, "engines": { "node": "20" } }

@@ -38,8 +38,52 @@ enum ListingCategory {
     }
   }
 
-  /// The suffix used when formatting a price for this category.
-  String get priceSuffix => this == ListingCategory.shortStay ? '/night' : '/yr';
+  /// The period shown next to a price. Derived from the category everywhere:
+  /// rent and commercial are annual, short stays are nightly, and a sale
+  /// price is a one-off amount with no period at all.
+  String get priceSuffix {
+    switch (this) {
+      case ListingCategory.rent:
+      case ListingCategory.commercial:
+        return '/yr';
+      case ListingCategory.shortStay:
+        return '/night';
+      case ListingCategory.sale:
+        return '';
+    }
+  }
+
+  /// "year" / "night" / "" — the long form used in the redesigned cards.
+  String get periodWord {
+    switch (this) {
+      case ListingCategory.rent:
+      case ListingCategory.commercial:
+        return 'year';
+      case ListingCategory.shortStay:
+        return 'night';
+      case ListingCategory.sale:
+        return '';
+    }
+  }
+
+  /// Annual-rent style categories that have a move-in cost (agency, legal,
+  /// caution…). Sale and nightly stays do not get an "annual rent" total.
+  bool get hasMoveInCost =>
+      this == ListingCategory.rent || this == ListingCategory.commercial;
+
+  /// Short label for filter chips: Rent / Sale / Short stay / Commercial.
+  String get chipLabel {
+    switch (this) {
+      case ListingCategory.rent:
+        return 'Rent';
+      case ListingCategory.sale:
+        return 'Sale';
+      case ListingCategory.shortStay:
+        return 'Short stay';
+      case ListingCategory.commercial:
+        return 'Commercial';
+    }
+  }
 
   /// Every selectable category, in the order they should appear in dropdowns.
   static const List<ListingCategory> selectable = [

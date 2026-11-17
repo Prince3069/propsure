@@ -1,50 +1,101 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import '../../presentation/providers/app_providers.dart';
 import '../../presentation/screens/auth/auth_gate_screen.dart';
+import '../../presentation/screens/auth/welcome_screen.dart';
 import '../../presentation/screens/shell/main_shell.dart';
 import '../../presentation/screens/home/home_screen.dart';
 import '../../presentation/screens/search/search_screen.dart';
+import '../../presentation/screens/search/filters_screen.dart';
 import '../../presentation/screens/map/map_screen.dart';
+import '../../presentation/screens/tours/tours_screen.dart';
+import '../../presentation/screens/workspace/workspace_screen.dart';
+import '../../presentation/screens/workspace/leads_screen.dart';
 import '../../presentation/screens/chat/chat_list_screen.dart';
 import '../../presentation/screens/chat/chat_screen.dart';
 import '../../presentation/screens/profile/profile_screen.dart';
 import '../../presentation/screens/profile/edit_profile_screen.dart';
 import '../../presentation/screens/listings/listing_detail_screen.dart';
-import '../../presentation/screens/listings/edit_listing_screen.dart'; // NEW
-import '../../presentation/screens/listings/upload_listing_screen.dart';
+import '../../presentation/screens/listings/move_in_costs_screen.dart';
+import '../../presentation/screens/listings/passport_screen.dart';
+import '../../presentation/screens/listings/report_screen.dart';
+import '../../presentation/screens/listings/add_listing_screen.dart';
+import '../../presentation/screens/listings/video_frame_review_screen.dart';
 import '../../presentation/screens/bookings/bookings_screen.dart';
 import '../../presentation/screens/bookings/booking_detail_screen.dart';
 import '../../presentation/screens/saved/saved_listings_screen.dart';
 import '../../presentation/screens/search/saved_searches_screen.dart';
 import '../../presentation/screens/compare/compare_screen.dart';
+import '../../presentation/screens/shortlist/shortlist_screen.dart';
 import '../../presentation/screens/notifications/notifications_screen.dart';
 import '../../presentation/screens/agent/agent_profile_screen.dart';
 import '../../presentation/screens/agent/agent_listings_screen.dart';
 import '../../presentation/screens/verification/verification_screen.dart';
+import '../../presentation/screens/bulk_upload/bulk_upload_screen.dart';
+import '../../presentation/screens/bulk_upload/whatsapp_bot_screen.dart';
 import '../../presentation/screens/payment/boost_listing_screen.dart';
 import '../../presentation/screens/payment/premium_screen.dart';
+import '../../presentation/screens/payment/checkout_screen.dart';
 import '../../presentation/screens/financing/rent_calculator_screen.dart';
 import '../../presentation/screens/settings/settings_screen.dart';
+import '../../presentation/screens/home_file/my_home_screen.dart';
 import '../../presentation/screens/info/about_propsure_screen.dart';
+import '../../presentation/screens/info/contact_support_screen.dart';
+import '../../presentation/screens/info/support_status_screen.dart';
 import '../../presentation/screens/info/faq_screen.dart';
-import '../../presentation/screens/info/safety_tips_screen.dart';
 import '../../presentation/screens/info/how_we_verify_screen.dart';
-import '../../presentation/screens/info/contact_screen.dart';
+import '../../presentation/screens/info/safety_tips_screen.dart';
+import '../../presentation/screens/info/legal_screen.dart';
 import '../constants/app_theme.dart';
+import '../widgets/ps_widgets.dart';
+
+/// Routes that need a signed-in user. Browsing (home, search, map, tours,
+/// listing pages, legal and help pages) stays open so people can explore
+/// before registering; the auth screen explains why when it is needed.
+const _authRoutes = <String>[
+  '/listing/new',
+  '/listing/edit',
+  '/workspace',
+  '/leads',
+  '/my-listings',
+  '/messages',
+  '/chat/',
+  '/profile',
+  '/saved',
+  '/bookings',
+  '/booking/',
+  '/notifications',
+  '/verification',
+  '/settings',
+  '/plan',
+  '/checkout',
+  '/payment',
+  '/bulk-import',
+  '/whatsapp-assist',
+  '/my-home',
+  '/support',
+  '/shortlist',
+];
+
+bool _needsAuth(String loc) {
+  // '/listing/:id/report' needs a signed-in reporter; plain listing pages don't.
+  if (RegExp(r'^/listing/[^/]+/(report|frames)$').hasMatch(loc)) return true;
+  return _authRoutes.any((r) => loc == r || loc.startsWith(r));
+}
 
 class _RouterNotifier extends ChangeNotifier {
   bool isSignedIn = false;
-
   _RouterNotifier(Ref ref) {
     ref.listen(firebaseAuthUserProvider, (_, next) {
-      final newValue = next.asData?.value != null;
-      if (newValue != isSignedIn) {
-        isSignedIn = newValue;
+      final v = next.asData?.value != null;
+      if (v != isSignedIn) {
+        isSignedIn = v;
         notifyListeners();
       }
-    });
+    }, fireImmediately: true);
   }
 }
 
@@ -52,177 +103,144 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   final notifier = _RouterNotifier(ref);
 
   return GoRouter(
-    initialLocation: '/home',
+    initialLocation: (Hive.box('settings_box').get('welcomeSeen', defaultValue: false) as bool) || FirebaseAuth.instance.currentUser != null ? '/home' : '/welcome',
     refreshListenable: notifier,
     redirect: (context, state) {
-      final isAuth = notifier.isSignedIn;
       final loc = state.matchedLocation;
-
-      const authRoutes = [
-        '/listing/upload',
-        '/listing/edit', // NEW - edit route needs auth
-        '/messages',
-        '/profile',
-        '/saved',
-        '/saved-searches',
-        '/bookings',
-        '/notifications',
-        '/profile/edit',
-        '/profile/listings',
-        '/payment',
-        '/verification',
-        '/settings',
-      ];
-
-      if (authRoutes.any((r) => loc.startsWith(r)) && !isAuth) {
-        return '/auth?redirect=${Uri.encodeComponent(loc)}';
+      if (loc == '/welcome') Hive.box('settings_box').put('welcomeSeen', true);
+      if (_needsAuth(loc) && !notifier.isSignedIn) {
+        return '/auth?redirect=${Uri.encodeComponent(state.uri.toString())}';
       }
-      if (loc.startsWith('/chat/') && !isAuth) {
-        return '/auth?redirect=${Uri.encodeComponent(loc)}';
+      if (notifier.isSignedIn && loc == '/auth') {
+        return state.uri.queryParameters['redirect'] ?? '/home';
       }
-      if (isAuth && loc.startsWith('/auth')) return '/home';
       return null;
     },
     routes: [
-      // ── Auth ──────────────────────────────────────────────────────────────
+      GoRoute(path: '/welcome', builder: (_, __) => const WelcomeScreen()),
       GoRoute(
         path: '/auth',
-        builder: (_, state) => AuthGateScreen(
-          redirectAfter: state.uri.queryParameters['redirect'],
+        builder: (_, s) => AuthGateScreen(
+          redirectAfter: s.uri.queryParameters['redirect'],
+          reason: s.uri.queryParameters['reason'],
         ),
       ),
 
-      // ── Main shell (bottom nav) ───────────────────────────────────────────
+      // Shell: renter = Discover/Tours/Saved/Inbox/Account,
+      //        agent  = Workspace/Listings/Leads/Inbox/Account.
       ShellRoute(
         builder: (_, __, child) => MainShell(child: child),
         routes: [
           GoRoute(path: '/home', builder: (_, __) => const HomeScreen()),
-          GoRoute(
-            path: '/search',
-            builder: (_, state) => SearchScreen(
-              initialQuery: state.uri.queryParameters['q'],
-              initialCategory: state.uri.queryParameters['category'],
-              initialType: state.uri.queryParameters['type'],
-            ),
-          ),
-          GoRoute(path: '/map', builder: (_, __) => const MapScreen()),
-          GoRoute(
-              path: '/messages', builder: (_, __) => const ChatListScreen()),
+          GoRoute(path: '/tours', builder: (_, __) => const ToursScreen()),
+          GoRoute(path: '/saved', builder: (_, __) => const SavedListingsScreen()),
+          GoRoute(path: '/messages', builder: (_, __) => const ChatListScreen()),
           GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
+          GoRoute(path: '/workspace', builder: (_, __) => const WorkspaceScreen()),
+          GoRoute(path: '/my-listings', builder: (_, __) => const AgentListingsScreen()),
+          GoRoute(path: '/leads', builder: (_, __) => const LeadsScreen()),
         ],
       ),
 
-      // ── Listings ──────────────────────────────────────────────────────────
+      // Search and Map are views inside Discover; they keep the filter state.
       GoRoute(
-        path: '/listing/upload',
-        builder: (_, __) => const UploadListingScreen(),
+        path: '/search',
+        builder: (_, s) => SearchScreen(
+          initialQuery: s.uri.queryParameters['q'],
+          initialCategory: s.uri.queryParameters['category'],
+          initialType: s.uri.queryParameters['type'],
+        ),
       ),
-      // ─── EDIT LISTING ROUTE (NEW) ───
+      GoRoute(path: '/search/filters', builder: (_, __) => const FiltersScreen()),
+      GoRoute(path: '/map', builder: (_, __) => const MapScreen()),
+
+      // Listing
+      GoRoute(path: '/listing/new', builder: (_, __) => const AddListingScreen()),
       GoRoute(
-        path: '/listing/edit/:listingId',
-        name: 'edit_listing',
-        builder: (_, state) {
-          final listingId = state.pathParameters['listingId']!;
-          return EditListingScreen(listingId: listingId);
-        },
+        path: '/listing/edit/:id',
+        builder: (_, s) => AddListingScreen(editListingId: s.pathParameters['id']),
       ),
-      // Consolidated: this used to build a second, less complete edit
-      // screen (UploadListingScreen(editListingId:)) which drifted from
-      // EditListingScreen over time — e.g. it never actually loaded the
-      // existing listing's category/location. Kept only as a redirect so
-      // old deep links (push notifications, shared links) still work.
+      GoRoute(
+        path: '/listing/:id/costs',
+        builder: (_, s) => MoveInCostsScreen(listingId: s.pathParameters['id']!),
+      ),
+      GoRoute(
+        path: '/listing/:id/passport',
+        builder: (_, s) => PassportScreen(listingId: s.pathParameters['id']!),
+      ),
+      GoRoute(
+        path: '/listing/:id/report',
+        builder: (_, s) => ReportConcernScreen(listingId: s.pathParameters['id']!),
+      ),
+      GoRoute(
+        path: '/listing/:id/frames',
+        builder: (_, s) => VideoFrameReviewScreen(listingId: s.pathParameters['id']!),
+      ),
       GoRoute(
         path: '/listing/:id/edit',
-        redirect: (_, state) => '/listing/edit/${state.pathParameters['id']}',
+        redirect: (_, s) => '/listing/edit/${s.pathParameters['id']}',
       ),
       GoRoute(
         path: '/listing/:id',
-        builder: (_, state) =>
-            ListingDetailScreen(listingId: state.pathParameters['id']!),
+        builder: (_, s) => ListingDetailScreen(listingId: s.pathParameters['id']!),
       ),
 
-      // ── Agent profile ─────────────────────────────────────────────────────
-      GoRoute(
-        path: '/agent/:agentId',
-        builder: (_, state) =>
-            AgentProfileScreen(agentId: state.pathParameters['agentId']!),
-      ),
-
-      // ── Chat ──────────────────────────────────────────────────────────────
-      GoRoute(
-        path: '/chat/:chatId',
-        builder: (_, state) =>
-            ChatScreen(chatId: state.pathParameters['chatId']!),
-      ),
-
-      // ── Bookings ──────────────────────────────────────────────────────────
+      // People & messaging
+      GoRoute(path: '/agent/:id', builder: (_, s) => AgentProfileScreen(agentId: s.pathParameters['id']!)),
+      GoRoute(path: '/chat/:id', builder: (_, s) => ChatScreen(chatId: s.pathParameters['id']!)),
       GoRoute(path: '/bookings', builder: (_, __) => const BookingsScreen()),
-      GoRoute(
-        path: '/booking/:id',
-        builder: (_, state) =>
-            BookingDetailScreen(bookingId: state.pathParameters['id']!),
-      ),
+      GoRoute(path: '/booking/:id', builder: (_, s) => BookingDetailScreen(bookingId: s.pathParameters['id']!)),
 
-      // ── Misc ──────────────────────────────────────────────────────────────
-      GoRoute(path: '/saved', builder: (_, __) => const SavedListingsScreen()),
-      GoRoute(
-          path: '/saved-searches',
-          builder: (_, __) => const SavedSearchesScreen()),
+      // Deciding & sharing
+      GoRoute(path: '/saved-searches', builder: (_, __) => const SavedSearchesScreen()),
       GoRoute(path: '/compare', builder: (_, __) => const CompareScreen()),
-      GoRoute(
-          path: '/notifications',
-          builder: (_, __) => const NotificationsScreen()),
-      GoRoute(
-          path: '/profile/edit', builder: (_, __) => const EditProfileScreen()),
-      GoRoute(
-          path: '/profile/listings',
-          builder: (_, __) => const AgentListingsScreen()),
+      GoRoute(path: '/shortlist/:id', builder: (_, s) => ShortlistScreen(shortlistId: s.pathParameters['id']!)),
+      GoRoute(path: '/my-home', builder: (_, __) => const MyHomeScreen()),
+      GoRoute(path: '/rent-planner', builder: (_, __) => const RentPlannerScreen()),
 
-      // ── Verification ──────────────────────────────────────────────────────
-      GoRoute(
-          path: '/verification',
-          builder: (_, __) => const VerificationScreen()),
-
-      // ── Payments ──────────────────────────────────────────────────────────
-      GoRoute(
-        path: '/payment/boost/:listingId',
-        builder: (_, state) =>
-            BoostListingScreen(listingId: state.pathParameters['listingId']!),
-      ),
-      GoRoute(
-          path: '/payment/premium', builder: (_, __) => const PremiumScreen()),
-
-      // ── Tools ─────────────────────────────────────────────────────────────
-      GoRoute(
-          path: '/rent-calculator',
-          builder: (_, __) => const RentCalculatorScreen()),
-
-      // ── Settings ──────────────────────────────────────────────────────────
+      // Account
+      GoRoute(path: '/profile/edit', builder: (_, __) => const EditProfileScreen()),
       GoRoute(path: '/settings', builder: (_, __) => const SettingsScreen()),
+      GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
+      GoRoute(path: '/verification', builder: (_, __) => const VerificationScreen()),
 
-      // ── Info / static pages ───────────────────────────────────────────────
+      // Agent tools
+      GoRoute(path: '/bulk-import', builder: (_, __) => const BulkImportScreen()),
+      GoRoute(path: '/whatsapp-assist', builder: (_, __) => const WhatsAppAssistScreen()),
+      GoRoute(path: '/plan', builder: (_, __) => const AgentPlanScreen()),
+      GoRoute(path: '/payment/boost/:id', builder: (_, s) => BoostListingScreen(listingId: s.pathParameters['id']!)),
       GoRoute(
-          path: '/info/about', builder: (_, __) => const AboutPropsureScreen()),
-      GoRoute(path: '/info/faq', builder: (_, __) => const FAQScreen()),
-      GoRoute(
-          path: '/info/safety', builder: (_, __) => const SafetyTipsScreen()),
-      GoRoute(
-          path: '/info/how-we-verify',
-          builder: (_, __) => const HowWeVerifyScreen()),
-      GoRoute(path: '/info/contact', builder: (_, __) => const ContactScreen()),
+        path: '/checkout',
+        builder: (_, s) => CheckoutScreen(
+          planId: s.uri.queryParameters['plan'] ?? '',
+          listingId: s.uri.queryParameters['listing'],
+          label: s.uri.queryParameters['label'] ?? 'Propsure tools',
+          amountNaira: int.tryParse(s.uri.queryParameters['amount'] ?? '') ?? 0,
+        ),
+      ),
+
+      // Help, trust & legal (all open without signing in)
+      GoRoute(path: '/info/about', builder: (_, __) => const AboutScreen()),
+      GoRoute(path: '/info/faq', builder: (_, __) => const FaqScreen()),
+      GoRoute(path: '/info/how-checks-work', builder: (_, __) => const HowChecksWorkScreen()),
+      GoRoute(path: '/info/safety', builder: (_, __) => const SafetyScreen()),
+      GoRoute(path: '/support', builder: (_, s) => SupportScreen(topic: s.uri.queryParameters['topic'])),
+      GoRoute(path: '/support/status', builder: (_, __) => const SupportStatusScreen()),
+      GoRoute(path: '/legal/privacy', builder: (_, __) => const LegalScreen(kind: LegalKind.privacy)),
+      GoRoute(path: '/legal/terms', builder: (_, __) => const LegalScreen(kind: LegalKind.terms)),
+
+      // Old links keep working.
+      GoRoute(path: '/profile/listings', redirect: (_, __) => '/my-listings'),
+      GoRoute(path: '/info/how-we-verify', redirect: (_, __) => '/info/how-checks-work'),
+      GoRoute(path: '/info/contact', redirect: (_, __) => '/support'),
+      GoRoute(path: '/rent-calculator', redirect: (_, __) => '/rent-planner'),
+      GoRoute(path: '/payment/premium', redirect: (_, __) => '/plan'),
     ],
     errorBuilder: (context, state) => Scaffold(
-      body: Center(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.error_outline, size: 56, color: AppColors.error),
-          const SizedBox(height: 14),
-          Text('Page not found',
-              style: Theme.of(context).textTheme.headlineMedium),
-          TextButton(
-            onPressed: () => context.go('/home'),
-            child: const Text('Go Home'),
-          ),
-        ]),
+      backgroundColor: AppColors.surface,
+      body: PsError(
+        message: 'That page is not available.',
+        onRetry: () => context.go('/home'),
       ),
     ),
   );

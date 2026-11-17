@@ -1,187 +1,56 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../../../core/constants/app_theme.dart';
+import '../../../core/widgets/common_widgets.dart';
 
-class SafetyTipsScreen extends StatelessWidget {
-  const SafetyTipsScreen({super.key});
+class SafetyScreen extends StatelessWidget {
+  const SafetyScreen({super.key});
+
+  void _detail(BuildContext c, String title, String body) => showModalBottomSheet<void>(
+        context: c,
+        backgroundColor: AppColors.card,
+        builder: (_) => SafeArea(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: AppText.h2), const SizedBox(height: 10), Text(body, style: AppText.body), const SizedBox(height: 16)]))),
+      );
 
   @override
   Widget build(BuildContext context) {
+    Widget tip(IconData icon, String t, String s) => Padding(padding: const EdgeInsets.only(bottom: 10), child: PsCard(onTap: () => _detail(context, t, s), semanticLabel: t, child: Row(children: [
+          PsIconCircle(icon, size: 52),
+          const SizedBox(width: 14),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(t, style: AppText.title), Text(s, style: AppText.small, maxLines: 2, overflow: TextOverflow.ellipsis)])),
+          const Icon(Icons.chevron_right_rounded),
+        ])));
     return Scaffold(
-      backgroundColor: AppColors.bg,
-      body: CustomScrollView(slivers: [
-        SliverAppBar(
-          expandedHeight: 190,
-          pinned: true,
-          backgroundColor: AppColors.primaryDark,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-            onPressed: () => context.pop(),
-          ),
-          flexibleSpace: FlexibleSpaceBar(
-            background: Container(
-              decoration: const BoxDecoration(gradient: LinearGradient(
-                colors: [AppColors.primaryDark, AppColors.primary])),
-              child: SafeArea(child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 56, 24, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    const Icon(Icons.shield_rounded, color: Colors.white, size: 38),
-                    const SizedBox(height: 10),
-                    Text('Safety Tips', style: GoogleFonts.plusJakartaSans(
-                        fontSize: 26, fontWeight: FontWeight.w800, color: Colors.white)),
-                    const Text('Stay safe while renting in Abuja',
-                        style: TextStyle(color: Colors.white70, fontSize: 13)),
-                  ],
-                ),
-              )),
-            ),
-          ),
-        ),
-        SliverToBoxAdapter(child: Center(child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 720),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              // Alert banner
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFEF3C7),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFFDE68A)),
-                ),
-                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Icon(Icons.warning_amber_rounded, color: Color(0xFFD97706), size: 20),
-                  const SizedBox(width: 10),
-                  const Expanded(child: Text(
-                    'Never send money to anyone before physically inspecting a property. Always meet agents in person.',
-                    style: TextStyle(fontSize: 13, color: Color(0xFF92400E), height: 1.5),
-                  )),
-                ]),
-              ),
-              const SizedBox(height: 20),
-
-              _buildCategory(context,
-                icon: Icons.search_rounded,
-                color: const Color(0xFF3B82F6),
-                title: 'For Tenants',
-                tips: [
-                  ('Inspect before paying', 'Never pay rent or any money before physically visiting and confirming the property exists and matches the listing photos.'),
-                  ('Verify agent identity', 'Ask to see the agent\'s ID card and confirm they appear on Propsure with a Verified badge before proceeding.'),
-                  ('Use secure payment', 'Avoid cash. Use bank transfer and keep every receipt. Never use unverified payment platforms.'),
-                  ('Meet in public first', 'For the first meeting, choose a neutral public location like a bank or business centre. Take someone with you.'),
-                  ('Check the documents', 'Before signing anything, verify the owner\'s title documents (Certificate of Occupancy, deed of assignment) at the Land Registry.'),
-                  ('Use the in-app chat', 'Keep all communication within Propsure\'s chat. This protects you and creates a record if there is a dispute.'),
-                ],
-              ),
-              const SizedBox(height: 16),
-
-              _buildCategory(context,
-                icon: Icons.home_outlined,
-                color: AppColors.primary,
-                title: 'For Landlords & Agents',
-                tips: [
-                  ('Screen tenants properly', 'Request government-issued ID, employment verification, and at least one reference before handing over keys.'),
-                  ('Use formal agreements', 'Always sign a written tenancy agreement. Use a certified lawyer to draft it.'),
-                  ('Never accept undated cheques', 'Only accept post-dated cheques from tenants you have thoroughly screened.'),
-                  ('Report suspicious tenants', 'If a potential tenant shows unusual urgency to move in quickly or refuses standard screening, report them.'),
-                  ('Complete your verification', 'Get your Propsure Verified badge. It builds trust and attracts genuine tenants.'),
-                ],
-              ),
-              const SizedBox(height: 16),
-
-              _buildCategory(context,
-                icon: Icons.report_problem_outlined,
-                color: const Color(0xFFDC2626),
-                title: 'Red Flags to Watch Out For',
-                tips: [
-                  ('Price too good to be true', 'If a property is listed far below market rate, it is likely a scam. Always compare with similar listings.'),
-                  ('Agent unavailable to meet', 'A genuine agent will always agree to show you the property in person. Remote-only requests are a major red flag.'),
-                  ('Pressure to decide quickly', 'Scammers create false urgency. Take your time to verify everything properly.'),
-                  ('Requests for payment upfront', 'Legitimate agents never ask for payment before showing you the property.'),
-                  ('No contract offered', 'Always insist on a formal tenancy agreement. Refuse any "gentleman\'s agreement" arrangement.'),
-                ],
-              ),
-              const SizedBox(height: 20),
-
-              // Report section
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [AppColors.primaryDark, AppColors.primary]),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Seen something suspicious?',
-                      style: GoogleFonts.plusJakartaSans(
-                          fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white)),
-                  const SizedBox(height: 6),
-                  const Text('Report any suspicious listing or agent directly from the listing page by tapping the flag icon. We review all reports within 24 hours.',
-                      style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5)),
-                  const SizedBox(height: 12),
-                  const Text('📧 hello@propsure.africa',
-                      style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-                ]),
-              ),
-              const SizedBox(height: 40),
-            ]),
-          ),
-        ))),
+      backgroundColor: AppColors.surface,
+      appBar: const PsTopBar(title: 'Stay safe'),
+      body: ListView(padding: kPagePadding, children: [
+        Text.rich(TextSpan(style: AppText.h1.copyWith(fontSize: 32), children: [const TextSpan(text: 'Before you '), TextSpan(text: 'pay or visit.', style: TextStyle(color: AppColors.primary))])),
+        const SizedBox(height: 16),
+        tip(Icons.person_search_outlined, 'Confirm who can rent out the home', 'Check the owner or agent’s identity and they have the right to rent it.'),
+        tip(Icons.home_work_outlined, 'Inspect and document its condition', 'View the property in person and take clear photos or videos.'),
+        tip(Icons.description_outlined, 'Get every fee and agreement in writing', 'Ask for a written tenancy agreement and a full breakdown of all costs.'),
+        const PsNote('Urgency, hidden fees and requests for your OTP are warning signs.', tone: PsTone.warning, icon: Icons.error_outline_rounded),
+        const SizedBox(height: 18),
+        const PsSectionTitle('During an inspection'),
+        const SizedBox(height: 10),
+        tip(Icons.groups_outlined, 'Share visit details with someone', 'Let a friend or family member know where you’re going and when to expect you back.'),
+        tip(Icons.place_outlined, 'Meet at an agreed location', 'Use a public, well-lit place and avoid going alone.'),
+        Padding(padding: const EdgeInsets.only(bottom: 10), child: PsCard(color: AppColors.errorPale, borderColor: AppColors.error, onTap: () => context.push('/support'), semanticLabel: 'Report a concern', child: Row(children: [
+          const Icon(Icons.flag_outlined, color: AppColors.error, size: 30),
+          const SizedBox(width: 14),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Report a concern', style: AppText.title.copyWith(color: AppColors.error)), Text('Tell us about a suspicious listing, person or request.', style: AppText.small.copyWith(color: AppColors.error))])),
+          const Icon(Icons.chevron_right_rounded, color: AppColors.error),
+        ]))),
+        PsCard(color: AppColors.primary, onTap: () => context.push('/info/faq'), semanticLabel: 'Read the renter checklist', child: Row(children: [
+          const Icon(Icons.description_outlined, color: Colors.white, size: 30),
+          const SizedBox(width: 14),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Read the renter checklist', style: AppText.title.copyWith(color: Colors.white)), Text('A simple checklist to help you stay safe.', style: AppText.small.copyWith(color: Colors.white70))])),
+          const Icon(Icons.chevron_right_rounded, color: Colors.white),
+        ])),
+        const SizedBox(height: 12),
+        Text('These tips do not guarantee safety and are not a substitute for legal advice or independent verification.', style: AppText.caption),
+        const SizedBox(height: 24),
       ]),
     );
-  }
-
-  Widget _buildCategory(BuildContext context, {
-    required IconData icon, required Color color,
-    required String title, required List<(String, String)> tips,
-  }) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [
-        Container(
-          width: 34, height: 34,
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(9)),
-          child: Icon(icon, size: 17, color: color),
-        ),
-        const SizedBox(width: 10),
-        Text(title, style: GoogleFonts.plusJakartaSans(
-            fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.text)),
-      ]),
-      const SizedBox(height: 10),
-      ...tips.asMap().entries.map((e) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Container(
-          padding: const EdgeInsets.all(13),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(11),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Container(
-              width: 24, height: 24,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1), shape: BoxShape.circle),
-              child: Center(child: Text('${e.key + 1}',
-                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: color))),
-            ),
-            const SizedBox(width: 10),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(e.value.$1, style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.text)),
-              const SizedBox(height: 3),
-              Text(e.value.$2, style: const TextStyle(
-                  fontSize: 12, color: AppColors.text2, height: 1.55)),
-            ])),
-          ]),
-        ),
-      )),
-    ]);
   }
 }

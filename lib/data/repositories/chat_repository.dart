@@ -125,7 +125,7 @@ class ChatRepository {
   }) async {
     final msgId = _uuid.v4();
     final ref = _storage.ref('chats/$chatId/$msgId.jpg');
-    await ref.putFile(imageFile);
+    await ref.putFile(imageFile, SettableMetadata(contentType: 'image/jpeg'));
     final imageUrl = await ref.getDownloadURL();
 
     await _sendMessage(

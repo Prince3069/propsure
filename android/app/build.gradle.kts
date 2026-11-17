@@ -44,8 +44,9 @@ android {
         applicationId = "com.princedevlabs.propsure"
         minSdk = flutter.minSdkVersion
         targetSdk     = 36
-        versionCode   = 9  // ← Changed from 3 to 4
-        versionName   = "1.0.9"   // ← Changed from 1.0.2 to 1.0.8
+        // Version now comes from pubspec.yaml (version: 1.1.0+11)
+        versionCode   = flutter.versionCode
+        versionName   = flutter.versionName
     }
 
     buildTypes {

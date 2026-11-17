@@ -1,0 +1,186 @@
+rules_version = '2';
+// Propsure Firestore rules.
+//
+// Principles
+//  - Identity comes from request.auth, never from a field the client sends.
+//  - Trust, payment, quota, availability and status fields are written ONLY
+//    by Cloud Functions (Admin SDK bypasses rules). Clients cannot set them.
+//  - Every update is limited to an explicit field allowlist.
+//  - Private people-data (users/*) is readable only by its owner and
+//    reviewers. Public agent info lives in public_profiles/* (server-written).
+//  Test these with the emulator before deploying (see DEPLOY.md).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── helpers ────────────────────────────────────────────────────────────
+    function signedIn() { return request.auth != null; }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+    function isReviewer() { return signedIn() && (request.auth.token.admin == true || request.auth.token.reviewer == true); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function changedKeys() { return incoming().diff(existing()).affectedKeys(); }
+    function onlyChanges(allowed) { return changedKeys().hasOnly(allowed); }
+    function roleOf(uid) { return get(/databases/$(database)/documents/users/$(uid)).data.role; }
+
+    // ── users (private) ────────────────────────────────────────────────────
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isReviewer();
+      // Self-declared marketplace role only. admin is never self-assignable;
+      // premium / verification / counters cannot be set on create.
+      allow create: if isOwner(uid)
+        && incoming().role in ['tenant', 'agent', 'landlord']
+        && !('premiumPlan' in incoming()) && !('premiumExpiresAt' in incoming())
+        && !('verificationStatus' in incoming()) && !('isVerified' in incoming())
+        && (!('totalListings' in incoming()) || incoming().totalListings == 0);
+      allow update: if isOwner(uid)
+        && onlyChanges(['name', 'email', 'bio', 'agencyName', 'profilePhoto', 'role', 'savedListings',
+                        'fcmToken', 'lastSeen', 'city', 'preferences', 'updatedAt'])
+        && incoming().role in ['tenant', 'agent', 'landlord'];
+      allow delete: if false; // account deletion is handled by a server process
+    }
+
+    // ── public_profiles (server-written mirror, safe to show) ──────────────
+    match /public_profiles/{uid} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // ── listings ───────────────────────────────────────────────────────────
+    match /listings/{id} {
+      allow read: if existing().status in ['active', 'rented'] || isOwner(existing().agentId) || isReviewer();
+      // Clients may only create DRAFTS they own. Publishing is a callable.
+      allow create: if signedIn() && incoming().agentId == request.auth.uid
+        && incoming().status == 'draft'
+        && roleOf(request.auth.uid) in ['agent', 'landlord']
+        && !('isFeatured' in incoming()) && !('safetyHold' in incoming()) && !('passport' in incoming())
+        && !('availabilityConfirmedAt' in incoming()) && !('verificationStatus' in incoming());
+      allow update: if isOwner(existing().agentId)
+        && existing().status in ['draft', 'paused', 'active', 'stale']
+        && incoming().agentId == existing().agentId
+        && onlyChanges(['title', 'description', 'price', 'propertyType', 'bedrooms', 'bathrooms', 'toilets',
+                        'location', 'area', 'city', 'images', 'amenities', 'isFurnished', 'petsAllowed',
+                        'parkingAvailable', 'additionalInfo', 'category', 'charges', 'chargesComplete',
+                        'unconfirmedCharges', 'agentName', 'agentPhone', 'agentPhoto', 'updatedAt'])
+        // `status`, `isFeatured`, `featuredUntil`, `passport`, `safetyHold`,
+        // `availability*`, `videoStatus`, `videoUrl`, `stills` and counters are deliberately absent.
+        ;
+      allow delete: if isOwner(existing().agentId) && existing().status in ['draft', 'archived'];
+
+      // viewedBy: one doc per viewer, create-only by that viewer
+      match /viewedBy/{viewer} {
+        allow create: if isOwner(viewer);
+        allow read, update, delete: if false;
+      }
+    }
+
+    // ── chats ──────────────────────────────────────────────────────────────
+    match /chats/{chatId} {
+      allow read: if signedIn() && request.auth.uid in existing().participantIds;
+      allow create: if signedIn() && request.auth.uid in incoming().participantIds
+        && incoming().participantIds.size() == 2;
+      allow update: if signedIn() && request.auth.uid in existing().participantIds
+        && incoming().participantIds == existing().participantIds
+        && onlyChanges(['lastMessage', 'updatedAt', 'unreadCounts', 'isArchived', 'blockedBy', 'mutedBy']);
+      allow delete: if false;
+
+      match /messages/{msgId} {
+        allow read: if signedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+        allow create: if signedIn() && incoming().senderId == request.auth.uid
+          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds
+          && !(get(/databases/$(database)/documents/chats/$(chatId)).data.blockedBy.size() > 0);
+        allow update: if signedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds
+          && onlyChanges(['isRead', 'readBy', 'isDeleted']);
+        allow delete: if false;
+      }
+    }
+
+    // ── bookings (inspections) ─────────────────────────────────────────────
+    match /bookings/{id} {
+      allow read: if signedIn() && (existing().userId == request.auth.uid || existing().agentId == request.auth.uid);
+      allow create: if signedIn() && incoming().userId == request.auth.uid
+        && incoming().status == 'pending' && incoming().agentId != request.auth.uid;
+      // Renter may cancel their own; the agent may confirm / reject / complete.
+      allow update: if signedIn() && (
+        (existing().userId == request.auth.uid && incoming().status == 'cancelled'
+          && onlyChanges(['status', 'cancelledBy', 'updatedAt', 'dateTime', 'message']))
+        || (existing().agentId == request.auth.uid
+          && incoming().status in ['confirmed', 'rejected', 'completed', 'cancelled']
+          && onlyChanges(['status', 'confirmedBy', 'rejectedBy', 'cancelledBy', 'completedBy', 'completedAt',
+                          'rejectionReason', 'updatedAt'])));
+      allow delete: if false;
+    }
+
+    // ── enquiries ──────────────────────────────────────────────────────────
+    match /enquiries/{id} {
+      allow read: if signedIn() && (existing().enquirerId == request.auth.uid || existing().agentId == request.auth.uid);
+      allow create: if signedIn() && incoming().enquirerId == request.auth.uid
+        && incoming().responseState == 'awaitingResponse';
+      allow update: if signedIn() && existing().agentId == request.auth.uid
+        && onlyChanges(['responseState', 'respondedAt']);
+      allow delete: if false;
+    }
+
+    // ── saved searches ─────────────────────────────────────────────────────
+    match /saved_searches/{id} {
+      allow read, delete: if signedIn() && existing().userId == request.auth.uid;
+      allow create: if signedIn() && incoming().userId == request.auth.uid;
+      allow update: if signedIn() && existing().userId == request.auth.uid
+        && onlyChanges(['alertsEnabled', 'label', 'cadence', 'channel', 'updatedAt']);
+    }
+
+    // ── notifications (server-created) ─────────────────────────────────────
+    match /notifications/{id} {
+      allow read: if signedIn() && existing().userId == request.auth.uid;
+      allow update: if signedIn() && existing().userId == request.auth.uid && onlyChanges(['isRead']);
+      allow create, delete: if false;
+    }
+
+    // ── support requests & reports (created by callable only) ──────────────
+    match /support_requests/{id} {
+      allow read: if signedIn() && (existing().userId == request.auth.uid || isReviewer());
+      allow write: if false;
+    }
+
+    // ── verification requests ──────────────────────────────────────────────
+    match /verification_requests/{id} {
+      allow read: if signedIn() && (existing().applicantId == request.auth.uid || isReviewer());
+      allow create: if signedIn() && incoming().applicantId == request.auth.uid
+        && incoming().status == 'submitted'
+        && incoming().requestType in ['identity', 'authority', 'agent_authority', 'landlord_ownership', 'property']
+        && !('reviewerId' in incoming()) && !('rejectionReason' in incoming()) && !('auditHistory' in incoming());
+      allow update, delete: if false;
+    }
+
+    // ── payments: read-only for the payer ──────────────────────────────────
+    match /transactions/{ref} {
+      allow read: if signedIn() && existing().userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    // ── shared shortlists ──────────────────────────────────────────────────
+    match /shortlists/{id} {
+      allow read: if signedIn() && request.auth.uid in existing().memberIds;
+      allow create: if signedIn() && incoming().ownerId == request.auth.uid
+        && incoming().memberIds == [request.auth.uid];
+      allow update: if signedIn() && request.auth.uid in existing().memberIds
+        && incoming().ownerId == existing().ownerId
+        && onlyChanges(['listingIds', 'notes', 'name', 'updatedAt'])
+        // only the owner can change membership (invites are accepted via link/callable)
+        ;
+      allow delete: if signedIn() && existing().ownerId == request.auth.uid;
+    }
+
+    // ── My home (private per user) ─────────────────────────────────────────
+    match /users/{uid}/home/{doc=**} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // ── config / promotions: public read, server write ─────────────────────
+    match /promotions/{doc} { allow read: if true; allow write: if false; }
+    match /promotions/{doc}/claims/{c} { allow read, write: if false; }
+    match /system/{doc} { allow read, write: if false; }
+    match /media_jobs/{id} { allow read: if isReviewer(); allow write: if false; }
+
+    match /{document=**} { allow read, write: if false; }
+  }
+}

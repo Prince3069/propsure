@@ -1,467 +1,136 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:timeago/timeago.dart' as timeago;
+import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/app_theme.dart';
+import '../../../core/utils/booking_labels.dart';
+import '../../../core/utils/freshness.dart';
 import '../../../core/widgets/common_widgets.dart';
-import '../../providers/app_providers.dart';
 import '../../../data/models/chat_model.dart';
+import '../../../data/repositories/booking_repository.dart';
+import '../../providers/app_providers.dart';
 
+/// Inbox: every conversation stays attached to its property. Inspection
+/// updates live in the second tab. No "Online" indicator — there is no real
+/// presence tracking.
 class ChatListScreen extends ConsumerStatefulWidget {
   const ChatListScreen({super.key});
   @override
-  ConsumerState<ChatListScreen> createState() => _ChatListScreenState();
+  ConsumerState<ChatListScreen> createState() => _State();
 }
 
-class _ChatListScreenState extends ConsumerState<ChatListScreen> {
-  bool _searching = false;
-  String _query = '';
-  final _searchCtrl = TextEditingController();
+class _State extends ConsumerState<ChatListScreen> {
+  int _tab = 0;
+  String _q = '';
 
-  @override
-  void dispose() {
-    _searchCtrl.dispose();
-    super.dispose();
-  }
-
-  // Filters client-side over whatever userChatsProvider already streamed
-  // — matches the other participant's name or the listing title. Fixes
-  // the search icon that previously had `onPressed: () {}` — nothing
-  // happened when tapped.
-  List<ChatModel> _filtered(List<ChatModel> chats, String userId) {
-    if (_query.trim().isEmpty) return chats;
-    final q = _query.trim().toLowerCase();
-    return chats.where((c) {
-      final otherName = c.otherParticipantName(userId).toLowerCase();
-      final listingTitle = (c.listingTitle ?? '').toLowerCase();
-      return otherName.contains(q) || listingTitle.contains(q);
-    }).toList();
+  String _time(DateTime t) {
+    final d = relativeDays(t);
+    if (d == 'today') return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+    return d == 'yesterday' ? 'Yesterday' : '${t.day}/${t.month}';
   }
 
   @override
   Widget build(BuildContext context) {
-    final userId = ref.watch(currentUserIdProvider);
-
-    if (userId == null) {
-      return const _GuestView();
-    }
-
-    final chatsAsync = ref.watch(userChatsProvider(userId));
-
+    final uid = ref.watch(currentUserIdProvider);
     return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(
-        title: _searching
-            ? TextField(
-                controller: _searchCtrl,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  hintText: 'Search conversations…',
-                  border: InputBorder.none,
+      backgroundColor: AppColors.surface,
+      body: SafeArea(
+        child: uid == null
+            ? PsEmpty(icon: Icons.chat_bubble_outline_rounded, title: 'Sign in to see your messages', message: 'Your conversations with agents will appear here.', actionLabel: 'Sign in', onAction: () => context.push('/auth?reason=message&redirect=/messages'))
+            : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+                  child: Row(children: [const PropsureLogo(size: 32), const Spacer(), Text('A safer way\nto find home', textAlign: TextAlign.right, style: AppText.caption)]),
                 ),
-                style: Theme.of(context).textTheme.bodyLarge,
-                onChanged: (v) => setState(() => _query = v),
-              )
-            : Text(
-                'Messages',
-                style: Theme.of(context).textTheme.headlineLarge,
-              ),
-        actions: [
-          IconButton(
-            icon: Icon(
-              _searching ? Icons.close_rounded : Icons.search_rounded,
-              color: AppColors.text2,
-            ),
-            onPressed: () => setState(() {
-              _searching = !_searching;
-              if (!_searching) {
-                _query = '';
-                _searchCtrl.clear();
-              }
-            }),
-          ),
-          const SizedBox(width: 6),
-        ],
-      ),
-      body: Column(
-        children: [
-          Container(
-            margin: const EdgeInsets.fromLTRB(14, 10, 14, 6),
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: AppColors.primaryPale,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.primaryPale2),
-            ),
-            child: const Row(
-              children: [
-                Icon(
-                  Icons.verified_user_outlined,
-                  color: AppColors.primary,
-                  size: 20,
-                ),
-                SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Keep conversations inside Propsure for a safer move.',
-                    style: TextStyle(
-                      color: AppColors.text,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
+                Padding(padding: const EdgeInsets.fromLTRB(24, 16, 24, 8), child: Text('Inbox', style: AppText.display)),
+                Padding(
+                  padding: kPagePadding,
+                  child: TextField(
+                    onChanged: (v) => setState(() => _q = v.trim().toLowerCase()),
+                    decoration: const InputDecoration(hintText: 'Find a conversation', prefixIcon: Icon(Icons.search_rounded)),
                   ),
                 ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: chatsAsync.when(
-              data: (chats) {
-                if (chats.isEmpty) {
-                  return EmptyState(
-                    icon: Icons.chat_bubble_outline_rounded,
-                    title: 'No messages yet',
-                    subtitle:
-                        'When you contact an agent about a property, your conversations will appear here.',
-                    action: TextButton(
-                      onPressed: () => context.push('/search'),
-                      child: const Text('Browse Properties'),
-                    ),
-                  );
-                }
-
-                final visible = _filtered(chats, userId);
-                if (visible.isEmpty) {
-                  return const EmptyState(
-                    icon: Icons.search_off_rounded,
-                    title: 'No matches',
-                    subtitle: 'Try a different name or property.',
-                  );
-                }
-
-                return ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 24),
-                  itemCount: visible.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 6),
-                  itemBuilder: (context, index) {
-                    return _ChatTile(
-                      chat: visible[index],
-                      userId: userId,
-                    );
-                  },
-                );
-              },
-              loading: () => ListView.separated(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                itemCount: 6,
-                separatorBuilder: (_, __) => const SizedBox(height: 6),
-                itemBuilder: (_, __) => const _ChatTileSkeleton(),
-              ),
-              // Friendly failure state instead of dumping the raw
-              // exception straight to the screen.
-              error: (error, _) => Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text('Couldn\'t load your messages right now.',
-                      style: const TextStyle(fontSize: 13, color: AppColors.text3)),
-                ),
-              ),
-            ),
-          ),
-        ],
+                Padding(padding: const EdgeInsets.fromLTRB(24, 12, 24, 8), child: PsSegmented(labels: const ['Messages', 'Inspection updates'], index: _tab, onChanged: (i) => setState(() => _tab = i))),
+                Expanded(child: _tab == 0 ? _messages(uid) : _inspections(uid)),
+              ]),
       ),
     );
   }
-}
 
-class _GuestView extends StatelessWidget {
-  const _GuestView();
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(
-        title: Text(
-          'Messages',
-          style: Theme.of(context).textTheme.headlineLarge,
-        ),
-      ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 84,
-                height: 84,
-                decoration: const BoxDecoration(
-                  color: AppColors.primaryPale,
-                  shape: BoxShape.circle,
+  Widget _messages(String uid) {
+    final async = ref.watch(userChatsProvider(uid));
+    return async.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (_, __) => PsError(onRetry: () => ref.invalidate(userChatsProvider(uid))),
+      data: (all) {
+        final chats = all.where((c) => !c.isArchived).where((c) => _q.isEmpty || c.otherParticipantName(uid).toLowerCase().contains(_q) || (c.listingTitle ?? '').toLowerCase().contains(_q)).toList();
+        if (chats.isEmpty) {
+          return PsEmpty(icon: Icons.chat_bubble_outline_rounded, title: _q.isEmpty ? 'No messages yet' : 'No matches', message: _q.isEmpty ? 'Ask an agent about a home and the conversation will stay attached to that property.' : 'Try a different name or property.', actionLabel: _q.isEmpty ? 'Find a home' : null, onAction: () => context.go('/home'));
+        }
+        return ListView.separated(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+          itemCount: chats.length + 1,
+          separatorBuilder: (_, __) => const Divider(height: 1),
+          itemBuilder: (_, i) {
+            if (i == chats.length) {
+              return Padding(padding: const EdgeInsets.only(top: 16), child: PsCard(color: AppColors.primaryPale, borderColor: AppColors.primaryPale2, child: Row(children: [const Icon(Icons.shield_outlined, color: AppColors.primary), const SizedBox(width: 12), Expanded(child: Text('Keep inspection arrangements in one place.', style: AppText.small.copyWith(color: AppColors.text)))])));
+            }
+            final c = chats[i];
+            final unread = c.unreadCount(uid);
+            final last = c.lastMessage;
+            final preview = last == null ? 'No messages yet' : (last.isDeleted ? 'Message deleted' : last.type == 'image' ? 'Photo' : last.type == 'booking' ? 'Inspection request' : (last.text ?? ''));
+            return Semantics(
+              button: true,
+              label: '${c.otherParticipantName(uid)}, ${c.listingTitle ?? ''}. $preview${unread > 0 ? ', unread' : ''}',
+              excludeSemantics: true,
+              child: InkWell(
+                onTap: () => context.push('/chat/${c.id}'),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 84),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Row(children: [
+                      PsAvatar(url: c.otherParticipantPhoto(uid), name: c.otherParticipantName(uid), size: 56),
+                      const SizedBox(width: 14),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(c.otherParticipantName(uid), style: AppText.title),
+                        if (c.listingTitle != null) Text(c.listingTitle!, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.small.copyWith(color: AppColors.text)),
+                        Text(preview, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.small),
+                      ])),
+                      Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                        Text(_time(c.updatedAt), style: AppText.caption),
+                        const SizedBox(height: 8),
+                        if (unread > 0) Container(width: 12, height: 12, decoration: const BoxDecoration(color: AppColors.primary, shape: BoxShape.circle)),
+                      ]),
+                    ]),
+                  ),
                 ),
-                child: const Icon(
-                  Icons.chat_bubble_outline_rounded,
-                  size: 38,
-                  color: AppColors.primary,
-                ),
               ),
-              const SizedBox(height: 18),
-              Text(
-                'Your messages',
-                style: Theme.of(context).textTheme.headlineSmall,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 7),
-              const Text(
-                'Sign in to chat with agents and landlords about properties.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppColors.text2,
-                  fontSize: 13,
-                ),
-              ),
-              const SizedBox(height: 22),
-              ElevatedButton(
-                onPressed: () => context.push('/auth?redirect=/messages'),
-                child: const Text('Sign In'),
-              ),
-            ],
-          ),
-        ),
-      ),
+            );
+          },
+        );
+      },
     );
   }
-}
 
-class _ChatTile extends StatelessWidget {
-  final ChatModel chat;
-  final String userId;
-
-  const _ChatTile({
-    required this.chat,
-    required this.userId,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final otherId = chat.participantIds.firstWhere(
-      (id) => id != userId,
-      orElse: () => userId,
-    );
-    final otherName = chat.participantNames[otherId] ?? 'Agent';
-    final otherPhoto = chat.participantPhotos[otherId];
-    final unread = chat.unreadCounts[userId] ?? 0;
-    final lastMessage = chat.lastMessage;
-    final isMe = lastMessage?.senderId == userId;
-
-    return Material(
-      color: AppColors.surface,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () => context.push('/chat/${chat.id}'),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  CircleAvatar(
-                    radius: 25,
-                    backgroundColor: AppColors.primaryPale2,
-                    backgroundImage: otherPhoto != null && otherPhoto.isNotEmpty
-                        ? NetworkImage(otherPhoto)
-                        : null,
-                    child: otherPhoto == null || otherPhoto.isEmpty
-                        ? Text(
-                            otherName.isNotEmpty
-                                ? otherName[0].toUpperCase()
-                                : '?',
-                            style: const TextStyle(
-                              color: AppColors.primary,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 17,
-                            ),
-                          )
-                        : null,
-                  ),
-                  Positioned(
-                    right: -1,
-                    bottom: -1,
-                    child: Container(
-                      width: 12,
-                      height: 12,
-                      decoration: BoxDecoration(
-                        color: AppColors.success,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: AppColors.surface,
-                          width: 2,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            otherName,
-                            style: TextStyle(
-                              fontWeight: unread > 0
-                                  ? FontWeight.w800
-                                  : FontWeight.w700,
-                              fontSize: 14,
-                              color: AppColors.text,
-                            ),
-                          ),
-                        ),
-                        if (lastMessage != null)
-                          Text(
-                            timeago.format(lastMessage.createdAt),
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: unread > 0
-                                  ? AppColors.primary
-                                  : AppColors.text3,
-                              fontWeight: unread > 0
-                                  ? FontWeight.w700
-                                  : FontWeight.w400,
-                            ),
-                          ),
-                      ],
-                    ),
-                    if (chat.listingTitle != null) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        chat.listingTitle!,
-                        style: const TextStyle(
-                          fontSize: 10,
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        if (isMe)
-                          const Text(
-                            'You: ',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppColors.text3,
-                            ),
-                          ),
-                        Expanded(
-                          child: Text(
-                            lastMessage?.isDeleted == true
-                                ? 'Message deleted'
-                                : (lastMessage?.text ?? ''),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color:
-                                  unread > 0 ? AppColors.text : AppColors.text3,
-                              fontWeight: unread > 0
-                                  ? FontWeight.w600
-                                  : FontWeight.w400,
-                              fontStyle: lastMessage?.isDeleted == true
-                                  ? FontStyle.italic
-                                  : FontStyle.normal,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (unread > 0) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            width: 20,
-                            height: 20,
-                            decoration: const BoxDecoration(
-                              color: AppColors.primary,
-                              shape: BoxShape.circle,
-                            ),
-                            child: Center(
-                              child: Text(
-                                '$unread',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              const Icon(
-                Icons.chevron_right_rounded,
-                color: AppColors.text3,
-                size: 18,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ChatTileSkeleton extends StatelessWidget {
-  const _ChatTileSkeleton();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          const CircleAvatar(
-            radius: 25,
-            backgroundColor: AppColors.bg,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  height: 12,
-                  width: 130,
-                  color: AppColors.bg,
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  height: 10,
-                  width: double.infinity,
-                  color: AppColors.bg,
-                ),
-              ],
+  Widget _inspections(String uid) {
+    final user = ref.watch(currentUserModelProvider).asData?.value;
+    final async = (user?.isAgent ?? false) ? ref.watch(agentBookingsProvider(uid)) : ref.watch(userBookingsProvider(uid));
+    return async.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (_, __) => PsError(onRetry: () => ref.invalidate(userBookingsProvider(uid))),
+      data: (list) {
+        if (list.isEmpty) return const PsEmpty(icon: Icons.event_outlined, title: 'No inspection updates', message: 'Requests and confirmations will show up here.');
+        return ListView(padding: const EdgeInsets.fromLTRB(24, 0, 24, 24), children: [
+          for (final b in list.take(20))
+            PsListRow(
+              leading: SizedBox(width: 56, height: 56, child: PsNetImage(b.listingThumbnail, radius: BorderRadius.circular(12))),
+              title: b.listingTitle,
+              subtitle: '${bookingStatusLabel(b.status)} · ${formatVisit(b.dateTime)}',
+              onTap: () => context.push('/booking/${b.id}'),
             ),
-          ),
-        ],
-      ),
+        ]);
+      },
     );
   }
 }

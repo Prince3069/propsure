@@ -1,153 +1,98 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../../../core/constants/app_theme.dart';
+import '../../../core/constants/listing_category.dart';
+import '../../../core/utils/format.dart';
 import '../../../core/widgets/common_widgets.dart';
 import '../../../data/repositories/saved_search_repository.dart';
+import '../../providers/actions.dart';
 import '../../providers/app_providers.dart';
 
-/// Lets a user view, toggle alerts on/off for, or delete their saved
-/// searches. Matching against new listings happens server-side (the
-/// `checkSavedSearches` scheduled Cloud Function) — this screen only
-/// manages what's saved, it doesn't run any matching itself.
+/// Search alerts: the actual filter brief for each saved search, a pause
+/// switch, and delivery. Only in-app alerts exist today; WhatsApp and email
+/// need separate permission and backend work, so they are shown as not
+/// available rather than as a promise.
 class SavedSearchesScreen extends ConsumerWidget {
   const SavedSearchesScreen({super.key});
 
+  List<String> _chips(SavedSearchModel s) => [
+        if (s.category != null) ListingCategory.fromAny(s.category).chipLabel,
+        if (s.propertyType != null) s.propertyType!,
+        if (s.area != null) s.area!,
+        if (s.minBedrooms != null) '${s.minBedrooms}+ beds',
+        if (s.maxPrice != null) 'Up to ${Money.short(s.maxPrice!)}',
+        if (s.query != null && s.query!.isNotEmpty) '“${s.query}”',
+      ];
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final userId = ref.watch(currentUserIdProvider);
-
-    if (userId == null) {
-      return Scaffold(
-        appBar: AppBar(
-            title: Text('Saved Searches',
-                style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700))),
-        body: EmptyState(
-          icon: Icons.notifications_active_outlined,
-          title: 'Get notified of new listings',
-          subtitle: 'Sign in to save a search and get alerted the moment a match goes live.',
-          action: ElevatedButton(
-            onPressed: () => context.push('/auth?redirect=/saved-searches'),
-            child: const Text('Sign In'),
-          ),
-        ),
-      );
-    }
-
-    final searchesAsync = ref.watch(mySavedSearchesProvider(userId));
-
+    final uid = ref.watch(currentUserIdProvider);
+    final async = uid == null ? null : ref.watch(mySavedSearchesProvider(uid));
     return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(
-        title: Text('Saved Searches', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
-      ),
-      body: searchesAsync.when(
-        data: (searches) {
-          if (searches.isEmpty) {
-            return EmptyState(
-              icon: Icons.notifications_active_outlined,
-              title: 'No saved searches yet',
-              subtitle: 'Search for a property, add filters, then tap "Save search & get alerts".',
-              action: TextButton(
-                onPressed: () => context.push('/search'),
-                child: const Text('Start Searching'),
-              ),
-            );
-          }
-          return ListView.separated(
-            padding: const EdgeInsets.all(14),
-            itemCount: searches.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 10),
-            itemBuilder: (_, i) {
-              final s = searches[i];
-              final summary = [
-                if (s.propertyType != null) s.propertyType,
-                if (s.area != null) s.area,
-                if (s.minBedrooms != null) '${s.minBedrooms}+ beds',
-                if (s.minPrice != null || s.maxPrice != null)
-                  '₦${s.minPrice?.toStringAsFixed(0) ?? '0'}–${s.maxPrice?.toStringAsFixed(0) ?? 'any'}',
-              ].where((x) => x != null).join(' · ');
-
-              return Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: Row(children: [
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => context.push(_searchRouteFor(s)),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(s.label,
-                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                          if (summary.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 3),
-                              child: Text(summary,
-                                  style: const TextStyle(fontSize: 12, color: AppColors.text3)),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Switch(
-                    value: s.alertsEnabled,
-                    onChanged: (v) => ref
-                        .read(savedSearchRepositoryProvider)
-                        .setAlertsEnabled(s.id, v),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline_rounded, color: AppColors.text3, size: 20),
-                    onPressed: () async {
-                      final confirmed = await showDialog<bool>(
-                        context: context,
-                        builder: (_) => AlertDialog(
-                          title: const Text('Delete saved search?'),
-                          actions: [
-                            TextButton(
-                                onPressed: () => Navigator.pop(context, false),
-                                child: const Text('Cancel')),
-                            TextButton(
-                                onPressed: () => Navigator.pop(context, true),
-                                child: const Text('Delete', style: TextStyle(color: AppColors.error))),
-                          ],
-                        ),
-                      );
-                      if (confirmed == true) {
-                        await ref.read(savedSearchRepositoryProvider).delete(s.id);
-                      }
-                    },
-                  ),
-                ]),
-              );
-            },
-          );
-        },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        // Friendly failure state instead of the raw exception.
-        error: (e, _) => const Center(
-          child: Padding(
-            padding: EdgeInsets.all(24),
-            child: Text('Couldn\'t load your saved searches right now.',
-                style: TextStyle(fontSize: 13, color: AppColors.text3)),
-          ),
+      backgroundColor: AppColors.surface,
+      body: ListView(padding: EdgeInsets.zero, children: [
+        PsGreenHeader(
+          padding: const EdgeInsets.fromLTRB(12, 0, 24, 40),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const PsTopBar(dark: true, backLabel: 'Back'),
+            Padding(padding: const EdgeInsets.only(left: 12), child: Text('Your search alerts', style: AppText.display.copyWith(color: Colors.white))),
+            Padding(padding: const EdgeInsets.fromLTRB(12, 6, 0, 0), child: Text('Good matches, not constant noise.', style: AppText.body.copyWith(color: Colors.white70))),
+          ]),
         ),
-      ),
+        Padding(
+          padding: kPagePadding,
+          child: async == null
+              ? const PsEmpty(icon: Icons.lock_outline_rounded, title: 'Sign in to save searches', message: 'We can tell you when a matching home is confirmed.')
+              : async.when(
+                  loading: () => const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator())),
+                  error: (_, __) => PsError(onRetry: () => ref.invalidate(mySavedSearchesProvider(uid!))),
+                  data: (list) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const SizedBox(height: 16),
+                    if (list.isEmpty)
+                      const PsEmpty(icon: Icons.notifications_none_rounded, title: 'No saved searches yet', message: 'Search for homes, then choose “Save search & get alerts”.'),
+                    for (final s in list)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: PsCard(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Row(children: [
+                              Expanded(child: Text(s.label, style: AppText.h3)),
+                              Column(children: [
+                                Switch(value: s.alertsEnabled, onChanged: (v) => runAction(context, () => ref.read(savedSearchRepositoryProvider).setAlertsEnabled(s.id, v))),
+                                Text(s.alertsEnabled ? 'In-app alerts' : 'Paused', style: AppText.caption),
+                              ]),
+                            ]),
+                            const SizedBox(height: 6),
+                            Wrap(spacing: 8, runSpacing: 8, children: [for (final c in _chips(s)) PsPill(c, tone: PsTone.neutral)]),
+                            const Divider(height: 28),
+                            Row(children: [
+                              Expanded(child: PsLink('View matches', underline: false, onTap: () => context.push('/search?q=${Uri.encodeComponent(s.query ?? '')}&category=${s.category ?? ''}&type=${s.propertyType ?? ''}'))),
+                              PsIconButton(icon: Icons.delete_outline_rounded, tooltip: 'Delete this search', onPressed: () => runAction(context, () => ref.read(savedSearchRepositoryProvider).delete(s.id))),
+                            ]),
+                          ]),
+                        ),
+                      ),
+                    const SizedBox(height: 8),
+                    Text('Send via', style: AppText.h3),
+                    const SizedBox(height: 10),
+                    const Row(children: [
+                      Expanded(child: PsChip('In-app', selected: true)),
+                      SizedBox(width: 8),
+                      Expanded(child: PsChip('WhatsApp')),
+                      SizedBox(width: 8),
+                      Expanded(child: PsChip('Email')),
+                    ]),
+                    const SizedBox(height: 6),
+                    Text('WhatsApp and email alerts are not available yet. Alerts arrive in the app and as a notification.', style: AppText.caption),
+                    const SizedBox(height: 16),
+                    PsButton('Save another search', kind: PsButtonKind.outline, icon: Icons.add_rounded, onPressed: () => context.push('/search')),
+                    const SizedBox(height: 24),
+                  ]),
+                ),
+        ),
+      ]),
     );
-  }
-
-  String _searchRouteFor(SavedSearchModel s) {
-    final params = <String, String>{};
-    if (s.query != null) params['q'] = s.query!;
-    if (s.category != null) params['category'] = s.category!;
-    if (s.propertyType != null) params['type'] = s.propertyType!;
-    if (params.isEmpty) return '/search';
-    final qs = params.entries.map((e) => '${e.key}=${Uri.encodeComponent(e.value)}').join('&');
-    return '/search?$qs';
   }
 }
