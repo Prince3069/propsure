@@ -38,9 +38,9 @@ class ProfileScreen extends ConsumerWidget {
     final isAgent = user?.role == 'agent' || user?.role == 'landlord';
     return Scaffold(
       backgroundColor: AppColors.surface,
-      body: SafeArea(child: ListView(padding: const EdgeInsets.fromLTRB(24, 16, 24, 24), children: [
-        Text('Account', style: AppText.h1.copyWith(fontSize: 34, color: AppColors.primary)),
-        const SizedBox(height: 14),
+      body: ListView(padding: EdgeInsets.zero, children: [
+        const PsTabHeader('Account'),
+        Padding(padding: const EdgeInsets.fromLTRB(24, 20, 24, 24), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           PsAvatar(url: user?.profilePhoto, name: user?.name ?? '', size: 80),
           const SizedBox(width: 16),
@@ -55,12 +55,18 @@ class ProfileScreen extends ConsumerWidget {
           PsListRow(icon: Icons.groups_outlined, title: isAgent ? 'Open agent workspace' : 'Switch to agent workspace', onTap: () => context.go(isAgent ? '/workspace' : '/profile/edit')),
         ]),
         const SizedBox(height: 12),
-        PsRowGroup([
-          PsListRow(icon: Icons.event_outlined, title: 'My inspections', onTap: () => context.push('/bookings')),
-          PsListRow(icon: Icons.bookmark_border_rounded, title: 'Saved homes', onTap: () => context.go('/saved')),
-          PsListRow(icon: Icons.notifications_none_rounded, title: 'Search alerts', onTap: () => context.push('/saved-searches')),
-          PsListRow(icon: Icons.home_outlined, title: 'My home', onTap: () => context.push('/my-home')),
-        ]),
+        if (isAgent)
+          PsRowGroup([
+            PsListRow(icon: Icons.event_outlined, title: 'Inspection requests', onTap: () => context.go('/leads')),
+            PsListRow(icon: Icons.search_rounded, title: 'Browse homes as a renter', onTap: () => context.go('/home?as=renter')),
+          ])
+        else
+          PsRowGroup([
+            PsListRow(icon: Icons.event_outlined, title: 'My inspections', onTap: () => context.push('/bookings')),
+            PsListRow(icon: Icons.bookmark_border_rounded, title: 'Saved homes', onTap: () => context.go('/saved')),
+            PsListRow(icon: Icons.notifications_none_rounded, title: 'Search alerts', onTap: () => context.push('/saved-searches')),
+            PsListRow(icon: Icons.home_outlined, title: 'My home', onTap: () => context.push('/my-home')),
+          ]),
         const SizedBox(height: 12),
         PsRowGroup([
           PsListRow(icon: Icons.shield_outlined, title: 'Verification', onTap: () => context.push('/verification')),
@@ -85,6 +91,7 @@ class ProfileScreen extends ConsumerWidget {
           ),
         ],
       ])),
+      ]),
     );
   }
 }

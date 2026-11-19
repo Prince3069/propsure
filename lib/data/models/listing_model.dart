@@ -398,7 +398,10 @@ class ListingModel {
       videoCandidates: ((data['videoCandidates'] as List?) ?? const [])
           .map((e) => VideoCandidate.fromMap(Map<String, dynamic>.from(e as Map)))
           .toList(),
-      videoCoverageWarning: data['videoCoverageWarning'] as String?,
+      // The media worker stores this as true/false; older data may hold text.
+      videoCoverageWarning: data['videoCoverageWarning'] is String
+          ? data['videoCoverageWarning'] as String
+          : (data['videoCoverageWarning'] == true ? 'This video may not show every room. You can add more photos or record again.' : null),
       stills: ((data['stills'] as List?) ?? const [])
           .map((e) => ListingStill.fromMap(Map<String, dynamic>.from(e as Map)))
           .toList(),
@@ -529,6 +532,7 @@ class ListingFilter {
   final double? minPrice;
   final double? maxPrice;
   final double? maxMoveIn; // total move-in budget
+  final String? city; // client-side city scope (canonical name), null = everywhere
   final bool budgetIsMoveIn; // true = budget applies to move-in total
   final List<String> mustHave; // amenity labels
   final bool recentlyConfirmedOnly;
@@ -545,6 +549,7 @@ class ListingFilter {
     this.minPrice,
     this.maxPrice,
     this.maxMoveIn,
+    this.city,
     this.budgetIsMoveIn = true,
     this.mustHave = const [],
     this.recentlyConfirmedOnly = false,
@@ -588,6 +593,8 @@ class ListingFilter {
     double? minPrice,
     double? maxPrice,
     double? maxMoveIn,
+    String? city,
+    bool clearCity = false,
     bool? budgetIsMoveIn,
     List<String>? mustHave,
     bool? recentlyConfirmedOnly,
@@ -614,6 +621,7 @@ class ListingFilter {
       minPrice: clearPrice ? null : (minPrice ?? this.minPrice),
       maxPrice: clearPrice ? null : (maxPrice ?? this.maxPrice),
       maxMoveIn: clearMoveIn ? null : (maxMoveIn ?? this.maxMoveIn),
+      city: clearCity ? null : (city ?? this.city),
       budgetIsMoveIn: budgetIsMoveIn ?? this.budgetIsMoveIn,
       mustHave: mustHave ?? this.mustHave,
       recentlyConfirmedOnly: recentlyConfirmedOnly ?? this.recentlyConfirmedOnly,
@@ -653,6 +661,7 @@ class ListingFilter {
           other.minPrice == minPrice &&
           other.maxPrice == maxPrice &&
           other.maxMoveIn == maxMoveIn &&
+          other.city == city &&
           other.budgetIsMoveIn == budgetIsMoveIn &&
           _listEq(other.mustHave, mustHave) &&
           other.recentlyConfirmedOnly == recentlyConfirmedOnly &&
@@ -670,6 +679,6 @@ class ListingFilter {
 
   @override
   int get hashCode => Object.hash(query, area, propertyType, category, minBedrooms, minPrice,
-      maxPrice, maxMoveIn, budgetIsMoveIn, Object.hashAll(mustHave), recentlyConfirmedOnly,
+      maxPrice, maxMoveIn, city, budgetIsMoveIn, Object.hashAll(mustHave), recentlyConfirmedOnly,
       isVerified, isFeatured, sortOrder);
 }

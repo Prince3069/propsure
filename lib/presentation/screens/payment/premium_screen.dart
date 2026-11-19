@@ -27,7 +27,7 @@ class _PlanState extends ConsumerState<AgentPlanScreen> {
       appBar: const PsTopBar(title: 'Agent tools'),
       body: pricing.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, __) => PsError(onRetry: () => ref.invalidate(pricingProvider)),
+        error: (e, _) => PsError(details: e, onRetry: () => ref.invalidate(pricingProvider)),
         data: (p) {
           final pro = p.agentPro;
           Widget tick(String t) => Padding(padding: const EdgeInsets.symmetric(vertical: 7), child: Row(children: [

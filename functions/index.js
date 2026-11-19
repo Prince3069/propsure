@@ -23,10 +23,13 @@ Object.assign(
   require('./lib/media'),
   require('./lib/alerts'),
   require('./lib/shortlist'),
+  require('./lib/accountcheck'),
+  require('./lib/areas'),
+  require('./lib/share'),
   require('./founder_promo')
 );
 
 // Helpers exported for unit tests are not Cloud Functions — remove them.
-for (const name of ['chargeMismatch', 'safeEqualHex', 'publishProblems', 'LIMITATIONS', 'TOPICS', 'REPORT_REASONS', 'jobIdFor', 'ORIGINAL_RE', 'matches', '__grant']) {
+for (const name of ['chargeMismatch', 'safeEqualHex', 'publishProblems', 'LIMITATIONS', 'TOPICS', 'REPORT_REASONS', 'jobIdFor', 'ORIGINAL_RE', 'namesMatch', 'areaKeyOf', 'TOPICS_AREA', 'matches', '__grant']) {
   delete exports[name];
 }

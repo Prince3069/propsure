@@ -22,7 +22,7 @@ class AgentProfileScreen extends ConsumerWidget {
       backgroundColor: AppColors.surface,
       body: p.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, __) => PsError(onRetry: () => ref.invalidate(publicProfileProvider(agentId))),
+        error: (e, _) => PsError(details: e, onRetry: () => ref.invalidate(publicProfileProvider(agentId))),
         data: (a) {
           if (a == null) return const SafeArea(child: PsEmpty(icon: Icons.person_off_outlined, title: 'Profile not found', message: 'This profile is not available.'));
           final first = listings.asData?.value.isNotEmpty == true ? listings.asData!.value.first : null;
@@ -35,7 +35,7 @@ class AgentProfileScreen extends ConsumerWidget {
                   const SizedBox(width: 16),
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(a.agencyName?.isNotEmpty == true ? a.agencyName! : a.name, style: AppText.h1.copyWith(color: AppColors.primary)),
-                    Text('${a.role == 'landlord' ? 'Landlord' : 'Property agent'} · Abuja', style: AppText.small),
+                    Text('${a.role == 'landlord' ? 'Landlord' : 'Property agent'}', style: AppText.small),
                     const SizedBox(height: 8),
                     if (a.identityReviewed) const PsPill('Agent ID checked', icon: Icons.verified_user_outlined),
                   ])),

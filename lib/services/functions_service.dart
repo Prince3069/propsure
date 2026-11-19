@@ -44,6 +44,32 @@ class PricingInfo {
   }
 }
 
+class BankOption {
+  final String name;
+  final String code;
+  const BankOption(this.name, this.code);
+}
+
+/// What the bank says about an account, and whether it matches the agent.
+class AccountCheckResult {
+  final String accountName;
+  final String verdict; // match | different | unknown
+  final String? matchedOn; // name | agency
+  final String? agentName;
+  final String? agencyName;
+  final bool agentIdChecked;
+  const AccountCheckResult({required this.accountName, required this.verdict, this.matchedOn, this.agentName, this.agencyName, this.agentIdChecked = false});
+
+  factory AccountCheckResult.fromMap(Map<String, dynamic> m) => AccountCheckResult(
+        accountName: (m['accountName'] ?? '') as String,
+        verdict: (m['verdict'] ?? 'unknown') as String,
+        matchedOn: m['matchedOn'] as String?,
+        agentName: m['agentName'] as String?,
+        agencyName: m['agencyName'] as String?,
+        agentIdChecked: m['agentIdChecked'] == true,
+      );
+}
+
 class FunctionsService {
   final FirebaseFunctions _fn;
   FunctionsService({FirebaseFunctions? fn}) : _fn = fn ?? FirebaseFunctions.instance;
@@ -98,6 +124,28 @@ class FunctionsService {
     Map<String, String> labels = const {},
   }) =>
       _call('confirmVideoFrames', {'listingId': listingId, 'frameIds': frameIds, 'coverId': coverId, 'labels': labels});
+
+  /// Rename rooms on stills that are already published. [labels] maps still URL → room name.
+  Future<void> updateStillLabels({required String listingId, required Map<String, String> labels}) =>
+      _call('updateStillLabels', {
+        'listingId': listingId,
+        'labels': [for (final e in labels.entries) {'url': e.key, 'label': e.value}],
+      });
+
+  Future<List<BankOption>> listBanks() async {
+    final r = await _call('listBanks');
+    return [
+      for (final e in (r['banks'] as List? ?? const []))
+        BankOption((e as Map)['name'] as String, e['code'] as String),
+    ];
+  }
+
+  Future<AccountCheckResult> checkAccountName({String? listingId, required String bankCode, required String accountNumber}) async =>
+      AccountCheckResult.fromMap(await _call('checkAccountName', {'listingId': listingId, 'bankCode': bankCode, 'accountNumber': accountNumber}));
+
+  /// answers: topic → option value, for example {'power': '12to18'}.
+  Future<void> submitAreaReport({required String city, required String area, required Map<String, String> answers}) =>
+      _call('submitAreaReport', {'city': city, 'area': area, 'answers': answers});
 
   Future<void> discardVideo(String listingId) => _call('discardVideo', {'listingId': listingId});
 

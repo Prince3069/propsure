@@ -41,7 +41,7 @@ class PassportScreen extends ConsumerWidget {
       appBar: const PsTopBar(title: 'Property passport'),
       body: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, __) => PsError(onRetry: () => ref.invalidate(listingByIdProvider(listingId))),
+        error: (e, _) => PsError(details: e, onRetry: () => ref.invalidate(listingByIdProvider(listingId))),
         data: (l) {
           if (l == null) return const PsEmpty(icon: Icons.home_outlined, title: 'Listing not found', message: 'This home may have been removed.');
           final profile = ref.watch(publicProfileProvider(l.agentId)).asData?.value;

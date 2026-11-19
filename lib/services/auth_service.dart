@@ -1,11 +1,10 @@
-import 'dart:io';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image_picker/image_picker.dart';
 import '../data/models/user_model.dart';
 import '../core/constants/app_constants.dart';
+import '../core/utils/upload.dart';
 
 class AuthResult {
   final bool success;
@@ -262,15 +261,9 @@ class AuthService {
 
   // ── Avatar upload from XFile ──────────────────────────────────────────────
   Future<String> _uploadAvatarFromXFile(String uid, XFile xFile) async {
-    final file = File(xFile.path);
-    final compressed = await FlutterImageCompress.compressWithFile(file.path,
-        minWidth: 400, minHeight: 400, quality: 75);
+    final bytes = await compressedImageBytes(xFile, minWidth: 400, minHeight: 400, quality: 75);
     final ref = _storage.ref('${AppConstants.pathUserAvatars}/$uid.jpg');
-    if (compressed != null) {
-      await ref.putData(compressed, SettableMetadata(contentType: 'image/jpeg'));
-    } else {
-      await ref.putFile(file, SettableMetadata(contentType: 'image/jpeg'));
-    }
+    await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
     return await ref.getDownloadURL();
   }
 }

@@ -1,11 +1,12 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../providers/city_provider.dart';
 import '../../../core/constants/app_theme.dart';
 import '../../../core/widgets/common_widgets.dart';
 import '../../providers/app_providers.dart';
+import '../../../core/utils/upload.dart';
 
 class EditProfileScreen extends ConsumerStatefulWidget {
   const EditProfileScreen({super.key});
@@ -101,7 +102,7 @@ class _EditProfileState extends ConsumerState<EditProfileScreen> {
               Center(child: Column(children: [
                 Stack(clipBehavior: Clip.none, children: [
                   _photo != null
-                      ? CircleAvatar(radius: 56, backgroundImage: FileImage(File(_photo!.path)))
+                      ? ClipOval(child: XFileImage(_photo!, width: 112, height: 112))
                       : PsAvatar(url: user.profilePhoto, name: user.name, size: 112),
                   Positioned(right: -2, bottom: -2, child: Semantics(button: true, label: 'Change photo', child: InkWell(onTap: _pickPhoto, customBorder: const CircleBorder(), child: Container(width: 44, height: 44, decoration: BoxDecoration(color: AppColors.primary, shape: BoxShape.circle, border: Border.all(color: AppColors.surface, width: 3)), child: const Icon(Icons.photo_camera_outlined, color: Colors.white, size: 20))))),
                 ]),
@@ -118,7 +119,7 @@ class _EditProfileState extends ConsumerState<EditProfileScreen> {
                 if (user.isPhoneVerified) const PsPill('Confirmed', icon: Icons.check_circle_rounded, tone: PsTone.success),
               ])),
               const SizedBox(height: 12),
-              PsDropdown<String>(label: 'City', value: _city, items: const ['Abuja'], itemLabel: (s) => s, onChanged: (v) => setState(() => _city = v ?? 'Abuja')),
+              PsDropdown<String>(label: 'City', value: _city, items: {for (final o in ref.watch(cityOptionsProvider)) if (o.open) o.name, _city}.toList(), itemLabel: (s) => s, onChanged: (v) => setState(() => _city = v ?? _city)),
               const SizedBox(height: 8),
               const PsNote('Your contact details are not shown publicly by default.', icon: Icons.info_outline_rounded),
               if (isPro) ...[

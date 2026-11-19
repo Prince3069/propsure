@@ -4,7 +4,11 @@
       "target": "app",
       "public": "build/web",
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-      "rewrites": [{ "source": "**", "destination": "/index.html" }]
+      "rewrites": [
+        { "source": "/l/**", "function": "shareListing" },
+        { "source": "/sitemap.xml", "function": "sitemap" },
+        { "source": "**", "destination": "/index.html" }
+      ]
     },
     {
       "target": "admin",

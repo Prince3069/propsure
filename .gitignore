@@ -43,3 +43,36 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# ---------------------------------------------------------------
+# Secrets (never commit these)
+# ---------------------------------------------------------------
+# Cloud Functions settings (Paystack secret key lives here)
+.env
+.env.*
+**/.env
+**/.env.*
+# Android signing
+key.properties
+**/key.properties
+*.jks
+*.keystore
+# Service account keys
+serviceAccountKey*.json
+*-firebase-adminsdk-*.json
+
+# ---------------------------------------------------------------
+# Firebase / Node
+# ---------------------------------------------------------------
+node_modules/
+**/node_modules/
+firebase-debug.log*
+firebase-debug.*.log*
+ui-debug.log
+.firebase/
+.runtimeconfig.json
+
+# ---------------------------------------------------------------
+# Backups made while deploying rules
+# ---------------------------------------------------------------
+*.bak

@@ -1,8 +1,9 @@
-import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import '../models/verification_request_model.dart';
 import '../../core/constants/app_constants.dart';
+import 'package:image_picker/image_picker.dart';
+import '../../core/utils/upload.dart';
 
 /// Replaces VerificationScreen's old `Future.delayed(seconds: 2)` fake
 /// submit. Documents go to a PRIVATE Storage path
@@ -45,10 +46,7 @@ class VerificationRepository {
   }
 
   Future<String> _uploadPrivate(
-      File file, String uid, String requestId, String filename) async {
-    if (!await file.exists()) {
-      throw Exception('File missing from device storage. Please re-select it.');
-    }
+      XFile file, String uid, String requestId, String filename) async {
     final path = 'verification/$uid/$requestId/$filename';
     final ref = _storage.ref(path);
     final lower = filename.toLowerCase();
@@ -59,7 +57,7 @@ class VerificationRepository {
             : lower.endsWith('.png')
                 ? 'image/png'
                 : 'image/jpeg';
-    await ref.putFile(file, SettableMetadata(contentType: mime));
+    await (await putPickedFile(ref, file, SettableMetadata(contentType: mime)));
     // Return the STORAGE PATH, not getDownloadURL() — this collection must
     // never contain a public URL. Reviewers fetch a signed URL server-side.
     return path;
@@ -72,10 +70,10 @@ class VerificationRepository {
     required String uid,
     required String requestType, // 'identity' | 'agent_authority' | 'landlord_ownership' | 'property'
     String? listingId,
-    File? selfie,
-    File? idDocument,
-    File? propertyDocument,
-    File? video,
+    XFile? selfie,
+    XFile? idDocument,
+    XFile? propertyDocument,
+    XFile? video,
   }) async {
     final docRef = _col.doc();
     final requestId = docRef.id;

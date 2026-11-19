@@ -5,12 +5,15 @@ import 'package:go_router/go_router.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:video_player/video_player.dart';
 import '../../../core/constants/app_theme.dart';
+import '../../../core/constants/rooms.dart';
 import '../../../core/utils/freshness.dart';
 import '../../../core/utils/move_in_cost.dart';
 import '../../../core/widgets/common_widgets.dart';
 import '../../../data/models/listing_model.dart';
 import '../../providers/actions.dart';
 import '../../providers/app_providers.dart';
+import '../area/area_screen.dart' show AreaPreviewCard;
+import 'tour_chapters_widgets.dart';
 
 class ListingDetailScreen extends ConsumerStatefulWidget {
   final String listingId;
@@ -49,6 +52,8 @@ class _DetailState extends ConsumerState<ListingDetailScreen> {
         final fresh = freshnessOf(l);
         final showVideo = l.hasVideo && _mode == 0;
         final photos = l.images;
+        final chapters = chaptersOf(l);
+        final coverage = coverageOf(l);
 
         Widget circle(IconData icon, String label, VoidCallback onTap) => Semantics(button: true, label: label, child: InkWell(onTap: onTap, customBorder: const CircleBorder(), child: Container(width: 48, height: 48, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle), child: Icon(icon, color: AppColors.text))));
 
@@ -95,7 +100,11 @@ class _DetailState extends ConsumerState<ListingDetailScreen> {
                   if (l.isSponsored) const Padding(padding: EdgeInsets.only(bottom: 8), child: PsPill('Sponsored', tone: PsTone.warning, small: true)),
                   Text(l.title, style: AppText.h1.copyWith(fontSize: 30)),
                   const SizedBox(height: 6),
-                  Row(children: [const Icon(Icons.location_on_rounded, color: AppColors.text2, size: 20), const SizedBox(width: 6), Expanded(child: Text(l.location.isApproximate ? '${l.location.area}, Abuja · approximate location' : l.location.fullAddress, style: AppText.body))]),
+                  Row(children: [const Icon(Icons.location_on_rounded, color: AppColors.text2, size: 20), const SizedBox(width: 6), Expanded(child: Text(l.location.isApproximate ? '${[l.location.area, l.location.city].where((e) => e.isNotEmpty).join(', ')} · approximate location' : l.location.fullAddress, style: AppText.body))]),
+                  if (l.hasVideo && chapters.isNotEmpty) ...[
+                    const SizedBox(height: 14),
+                    ChapterChips(chapters: chapters, onTap: (c) => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TourPlayerPage(listing: l, startMs: c.startMs)))),
+                  ],
                   const Divider(height: 28),
                   Text(l.priceLabel, style: AppText.h1.copyWith(fontSize: 36, color: AppColors.primary)),
                   const SizedBox(height: 6),
@@ -108,6 +117,16 @@ class _DetailState extends ConsumerState<ListingDetailScreen> {
                     _Fact(Icons.bed_outlined, '${l.bedrooms} ${l.bedrooms == 1 ? 'bed' : 'beds'}'),
                     _Fact(Icons.shower_outlined, '${l.bathrooms} ${l.bathrooms == 1 ? 'bath' : 'baths'}'),
                     for (final a in l.amenities.where((a) => a == 'Borehole / Water' || a == 'Prepaid Meter').take(2)) _Fact(a == 'Prepaid Meter' ? Icons.credit_card_outlined : Icons.water_drop_outlined, a == 'Borehole / Water' ? 'Water' : 'Prepaid meter'),
+                  ])),
+                  if (l.hasVideo && coverage != null) ...[const SizedBox(height: 14), CoverageCard(coverage: coverage)],
+                  const SizedBox(height: 14),
+                  AreaPreviewCard(city: l.location.city.isNotEmpty ? l.location.city : l.location.state, area: l.location.area),
+                  const SizedBox(height: 14),
+                  PsCard(onTap: () => context.push('/check-account?listing=${l.id}'), semanticLabel: 'Before you pay, check the account name', child: Row(children: [
+                    const Icon(Icons.account_balance_outlined, color: AppColors.primary, size: 30),
+                    const SizedBox(width: 14),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Before you pay', style: AppText.title), Text('Check the name on the account', style: AppText.small)])),
+                    const Icon(Icons.chevron_right_rounded),
                   ])),
                   const SizedBox(height: 14),
                   PsCard(onTap: () => context.push('/listing/${l.id}/passport'), semanticLabel: 'What has been checked', child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -160,7 +179,9 @@ class _Fact extends StatelessWidget {
 /// uses the smaller rendition when one exists.
 class TourPlayerPage extends StatefulWidget {
   final ListingModel listing;
-  const TourPlayerPage({super.key, required this.listing});
+  /// Where to start, in milliseconds (a tapped room chapter). 0 = the beginning.
+  final int startMs;
+  const TourPlayerPage({super.key, required this.listing, this.startMs = 0});
   @override
   State<TourPlayerPage> createState() => _TourPlayerState();
 }
@@ -176,7 +197,13 @@ class _TourPlayerState extends State<TourPlayerPage> {
     final url = (low && widget.listing.videoLowUrl != null) ? widget.listing.videoLowUrl! : widget.listing.videoUrl!;
     final c = VideoPlayerController.networkUrl(Uri.parse(url));
     _c = c;
-    c.initialize().then((_) { if (mounted) setState(() {}); }).catchError((_) { if (mounted) setState(() => _failed = true); });
+    c.initialize().then((_) async {
+      if (widget.startMs > 0) {
+        await c.seekTo(Duration(milliseconds: widget.startMs));
+        await c.play();
+      }
+      if (mounted) setState(() {});
+    }).catchError((_) { if (mounted) setState(() => _failed = true); });
     c.addListener(() { if (mounted) setState(() {}); });
   }
 
@@ -190,6 +217,14 @@ class _TourPlayerState extends State<TourPlayerPage> {
   Widget build(BuildContext context) {
     final c = _c;
     final ready = c != null && c.value.isInitialized;
+    final chapters = chaptersOf(widget.listing);
+    int? active;
+    if (ready) {
+      final pos = c.value.position.inMilliseconds;
+      for (var i = 0; i < chapters.length; i++) {
+        if (chapters[i].startMs <= pos) active = i;
+      }
+    }
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(child: Stack(children: [
@@ -200,6 +235,18 @@ class _TourPlayerState extends State<TourPlayerPage> {
                 : const CircularProgressIndicator()),
         Positioned(left: 8, top: 8, child: IconButton(tooltip: 'Close', onPressed: () => Navigator.of(context).pop(), icon: const Icon(Icons.close_rounded, color: Colors.white))),
         if (ready) Positioned(left: 16, right: 16, bottom: 16, child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (chapters.isNotEmpty) ...[
+            ChapterChips(
+              chapters: chapters,
+              activeIndex: active,
+              dark: true,
+              onTap: (ch) async {
+                await c.seekTo(Duration(milliseconds: ch.startMs));
+                await c.play();
+              },
+            ),
+            const SizedBox(height: 10),
+          ],
           VideoProgressIndicator(c, allowScrubbing: true, colors: const VideoProgressColors(playedColor: Colors.white)),
           const SizedBox(height: 8),
           IconButton(iconSize: 48, tooltip: c.value.isPlaying ? 'Pause' : 'Play', onPressed: () => c.value.isPlaying ? c.pause() : c.play(), icon: Icon(c.value.isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded, color: Colors.white)),

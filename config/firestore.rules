@@ -179,6 +179,11 @@ service cloud.firestore {
     match /promotions/{doc} { allow read: if true; allow write: if false; }
     match /promotions/{doc}/claims/{c} { allow read, write: if false; }
     match /system/{doc} { allow read, write: if false; }
+    // Public, read-only app settings (for example the WhatsApp assist number).
+    // Written only from the Firebase console.
+    match /public_config/{doc} { allow read: if true; allow write: if false; }
+    // Public per-area summaries of resident reports (server-written; raw reports stay private).
+    match /area_summaries/{id} { allow read: if true; allow write: if false; }
     match /media_jobs/{id} { allow read: if isReviewer(); allow write: if false; }
 
     match /{document=**} { allow read, write: if false; }

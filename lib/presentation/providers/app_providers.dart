@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/constants/app_constants.dart';
+import '../../core/utils/area.dart';
 import '../../data/models/listing_model.dart';
 import '../../data/models/chat_model.dart';
 import '../../data/models/user_model.dart';
@@ -18,6 +19,7 @@ import '../../data/repositories/shortlist_repository.dart';
 import '../../data/models/verification_request_model.dart';
 import '../../services/auth_service.dart';
 import '../../services/functions_service.dart';
+import 'city_provider.dart';
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 final authServiceProvider = Provider<AuthService>((ref) => AuthService());
@@ -229,7 +231,9 @@ final featuredListingsProvider = StreamProvider<List<ListingModel>>((ref) {
 final filteredListingsProvider =
     StreamProvider.family<List<ListingModel>, ListingFilter>((ref, filter) {
   final repo = ref.watch(listingRepositoryProvider);
-  return repo.watchListings(filter: filter, limit: 30);
+  // Search is scoped to the city the user picked unless the filter says otherwise.
+  final eff = filter.city == null ? filter.copyWith(city: ref.watch(selectedCityProvider)) : filter;
+  return repo.watchListings(filter: eff, limit: 30);
 });
 
 // ── Single listing ────────────────────────────────────────────────────────────
@@ -354,3 +358,48 @@ final agentPendingCountProvider =
 // ── User by ID ────────────────────────────────────────────────────────────────
 // Other people's data comes from the public mirror only. Private user
 // documents are readable by their owner (and reviewers) alone.
+
+
+// ── Public app settings (editable from the Firebase console) ─────────────────
+/// Document `public_config/app`, for example { whatsappAssistNumber: "2348012345678" }.
+final appConfigProvider = StreamProvider<Map<String, dynamic>>((ref) {
+  return FirebaseFirestore.instance
+      .doc('public_config/app')
+      .snapshots()
+      .map((s) => s.data() ?? const <String, dynamic>{});
+});
+
+/// Default Propsure WhatsApp line (08107286686). It is built into the app, so
+/// WhatsApp works with no setup. To change the number without a new build,
+/// set `whatsappAssistNumber` in Firestore `public_config/app`; that value
+/// wins when it exists.
+const String kWhatsAppAssistNumber = '2348107286686';
+
+/// The WhatsApp number as digits only (country code first).
+final whatsappAssistNumberProvider = Provider<String?>((ref) {
+  final raw = ref.watch(appConfigProvider).asData?.value['whatsappAssistNumber'];
+  return normalizeWhatsAppNumber(raw?.toString()) ?? normalizeWhatsAppNumber(kWhatsAppAssistNumber);
+});
+
+/// "+234 801 234 5678", "08012345678" and "2348012345678" all become
+/// "2348012345678". Returns null when the value cannot be a phone number.
+String? normalizeWhatsAppNumber(String? raw) {
+  if (raw == null) return null;
+  var d = raw.replaceAll(RegExp(r'[^0-9]'), '');
+  if (d.startsWith('0') && d.length == 11) d = '234${d.substring(1)}';
+  return d.length >= 10 && d.length <= 15 ? d : null;
+}
+
+
+// ── Life around the home ──────────────────────────────────────────────────────
+/// Public summary of resident reports for one area (document id = area key).
+final areaSummaryProvider = StreamProvider.family<AreaSummary?, String>((ref, key) {
+  return FirebaseFirestore.instance
+      .collection('area_summaries')
+      .doc(key)
+      .snapshots()
+      .map((d) => d.exists ? AreaSummary.fromDoc(d) : null);
+});
+
+/// Banks for the account-name check (cached for the session).
+final banksProvider = FutureProvider<List<BankOption>>((ref) => ref.watch(functionsServiceProvider).listBanks());

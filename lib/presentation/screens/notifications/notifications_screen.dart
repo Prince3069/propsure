@@ -117,7 +117,7 @@ class NotificationsScreen extends ConsumerWidget {
       body: SafeArea(
         child: async.when(
           loading: () => const Center(child: CircularProgressIndicator()),
-          error: (_, __) => PsError(onRetry: () => ref.invalidate(_notificationsProvider)),
+          error: (e, _) => PsError(details: e, onRetry: () => ref.invalidate(_notificationsProvider)),
           data: (list) {
             final today = list.where((n) => isToday(n.createdAt)).toList();
             final earlier = list.where((n) => !isToday(n.createdAt)).toList();

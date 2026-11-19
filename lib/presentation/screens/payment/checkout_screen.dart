@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../../../core/constants/app_theme.dart';
 import '../../../core/utils/format.dart';
@@ -52,6 +54,14 @@ class _CheckoutState extends ConsumerState<CheckoutScreen> {
       return;
     }
     final ref0 = init.reference ?? '';
+    if (kIsWeb) {
+      // On the website Paystack's page replaces this one, then returns to
+      // /payment/callback, which asks the server to verify the payment.
+      final ok = await launchUrl(Uri.parse(init.checkoutUrl!), webOnlyWindowName: '_self');
+      if (!mounted) return;
+      if (!ok) setState(() { _busy = false; _error = 'We could not open the payment page. Please try again.'; });
+      return;
+    }
     final done = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => _PayPage(url: init.checkoutUrl!, reference: ref0)));
     if (!mounted) return;
     setState(() => _busy = false);
@@ -159,4 +169,54 @@ class _PayPageState extends State<_PayPage> {
           if (_verifying) Container(color: Colors.white70, child: const Center(child: CircularProgressIndicator())),
         ]),
       );
+}
+
+
+/// Where Paystack returns the browser after payment (website only). The paid
+/// state is still decided by the server, never by this page.
+class PaymentCallbackScreen extends StatefulWidget {
+  final String? reference;
+  const PaymentCallbackScreen({super.key, required this.reference});
+  @override
+  State<PaymentCallbackScreen> createState() => _PaymentCallbackState();
+}
+
+class _PaymentCallbackState extends State<PaymentCallbackScreen> {
+  bool _done = false;
+  bool _ok = false;
+  String? _message;
+
+  @override
+  void initState() {
+    super.initState();
+    _run();
+  }
+
+  Future<void> _run() async {
+    final r = widget.reference;
+    if (r == null || r.isEmpty) {
+      setState(() { _done = true; _message = 'We could not find this payment. If you were charged, it will appear in your account shortly, or contact support.'; });
+      return;
+    }
+    final res = await PaystackService.verifyPayment(r);
+    if (!mounted) return;
+    setState(() { _done = true; _ok = res.success; _message = res.success ? null : (res.error ?? 'We could not confirm the payment yet. If you were charged, it will appear in your account shortly, or contact support.'); });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.surface,
+      appBar: const PsTopBar(title: 'Payment', showBack: false),
+      body: !_done
+          ? const Center(child: CircularProgressIndicator())
+          : PsEmpty(
+              icon: _ok ? Icons.check_circle_outline_rounded : Icons.info_outline_rounded,
+              title: _ok ? 'Payment confirmed' : 'We could not confirm this payment yet',
+              message: _ok ? 'Your agent tools are ready.' : (_message ?? ''),
+              actionLabel: _ok ? 'Go to my workspace' : 'Contact support',
+              onAction: () => context.go(_ok ? '/workspace' : '/support'),
+            ),
+    );
+  }
 }

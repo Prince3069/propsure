@@ -1,9 +1,10 @@
-import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:uuid/uuid.dart';
 import '../models/chat_model.dart';
 import '../../core/constants/app_constants.dart';
+import 'package:image_picker/image_picker.dart';
+import '../../core/utils/upload.dart';
 
 class ChatRepository {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -120,12 +121,12 @@ class ChatRepository {
     required String senderId,
     required String senderName,
     String? senderPhoto,
-    required File imageFile,
+    required XFile imageFile,
     required List<String> participantIds,
   }) async {
     final msgId = _uuid.v4();
     final ref = _storage.ref('chats/$chatId/$msgId.jpg');
-    await ref.putFile(imageFile, SettableMetadata(contentType: 'image/jpeg'));
+    await ref.putData(await compressedImageBytes(imageFile, minWidth: 1600, minHeight: 1600, quality: 80), SettableMetadata(contentType: 'image/jpeg'));
     final imageUrl = await ref.getDownloadURL();
 
     await _sendMessage(

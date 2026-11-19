@@ -46,7 +46,7 @@ class SavedSearchesScreen extends ConsumerWidget {
               ? const PsEmpty(icon: Icons.lock_outline_rounded, title: 'Sign in to save searches', message: 'We can tell you when a matching home is confirmed.')
               : async.when(
                   loading: () => const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator())),
-                  error: (_, __) => PsError(onRetry: () => ref.invalidate(mySavedSearchesProvider(uid!))),
+                  error: (e, _) => PsError(details: e, onRetry: () => ref.invalidate(mySavedSearchesProvider(uid!))),
                   data: (list) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     const SizedBox(height: 16),
                     if (list.isEmpty)
@@ -80,12 +80,12 @@ class SavedSearchesScreen extends ConsumerWidget {
                     const Row(children: [
                       Expanded(child: PsChip('In-app', selected: true)),
                       SizedBox(width: 8),
-                      Expanded(child: PsChip('WhatsApp')),
+                      Expanded(child: Opacity(opacity: 0.45, child: IgnorePointer(child: PsChip('WhatsApp')))),
                       SizedBox(width: 8),
-                      Expanded(child: PsChip('Email')),
+                      Expanded(child: Opacity(opacity: 0.45, child: IgnorePointer(child: PsChip('Email')))),
                     ]),
                     const SizedBox(height: 6),
-                    Text('WhatsApp and email alerts are not available yet. Alerts arrive in the app and as a notification.', style: AppText.caption),
+                    Text('WhatsApp and email alerts are coming soon. Alerts arrive in the app and as a notification.', style: AppText.caption),
                     const SizedBox(height: 16),
                     PsButton('Save another search', kind: PsButtonKind.outline, icon: Icons.add_rounded, onPressed: () => context.push('/search')),
                     const SizedBox(height: 24),

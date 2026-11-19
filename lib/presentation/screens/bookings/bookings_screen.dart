@@ -50,7 +50,7 @@ class _State extends ConsumerState<BookingsScreen> {
             else
               async.when(
                 loading: () => const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator())),
-                error: (_, __) => PsError(onRetry: () => ref.invalidate(userBookingsProvider(uid!))),
+                error: (e, _) => PsError(details: e, onRetry: () => ref.invalidate(userBookingsProvider(uid!))),
                 data: (all) {
                   final upcoming = all.where((b) => (b.status == AppConstants.bookingPending || b.status == AppConstants.bookingConfirmed) && b.dateTime.isAfter(cutoff)).toList()
                     ..sort((a, b) => a.dateTime.compareTo(b.dateTime));

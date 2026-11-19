@@ -26,10 +26,9 @@ class LeadsScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: AppColors.surface,
-      body: SafeArea(child: ListView(padding: const EdgeInsets.fromLTRB(24, 12, 24, 24), children: [
-        Text('Leads', style: AppText.h1.copyWith(fontSize: 34, color: AppColors.primary)),
-        Text('People asking about your homes.', style: AppText.bodyMuted),
-        const SizedBox(height: 16),
+      body: ListView(padding: EdgeInsets.zero, children: [
+        const PsTabHeader('Leads', subtitle: 'People asking about your homes.'),
+        Padding(padding: const EdgeInsets.fromLTRB(24, 20, 24, 24), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const PsSectionTitle('Inspection requests'),
         const SizedBox(height: 10),
         if (upcoming.isEmpty) Text('No inspections to handle.', style: AppText.bodyMuted),
@@ -58,6 +57,7 @@ class LeadsScreen extends ConsumerWidget {
           ]),
         ]))),
       ])),
+      ]),
     );
   }
 }

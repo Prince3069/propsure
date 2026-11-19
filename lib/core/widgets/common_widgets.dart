@@ -8,6 +8,28 @@ import 'ps_widgets.dart';
 
 export 'ps_widgets.dart';
 
+/// The shared header for the main tabs (Listings, Leads, Inbox, Account):
+/// green panel, logo, large title and a one-line subtitle.
+class PsTabHeader extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+  const PsTabHeader(this.title, {super.key, this.subtitle, this.trailing});
+
+  @override
+  Widget build(BuildContext context) {
+    return PsGreenHeader(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [const PropsureLogo(light: true, size: 30), const Spacer(), if (trailing != null) trailing!]),
+        const SizedBox(height: 12),
+        Semantics(header: true, child: Text(title, style: AppText.display.copyWith(color: Colors.white))),
+        if (subtitle != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text(subtitle!, style: AppText.body.copyWith(color: Colors.white70))),
+      ]),
+    );
+  }
+}
+
 /// Propsure wordmark: green house mark + name. No emoji, no claims.
 class PropsureLogo extends StatelessWidget {
   final double size;

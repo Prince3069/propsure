@@ -23,8 +23,10 @@ class _State extends ConsumerState<AgentListingsScreen> {
   int _tab = 0;
   static const _tabs = ['Active', 'Drafts', 'Paused', 'Archived'];
 
-  bool _inTab(ListingModel l) {
-    switch (_tab) {
+  bool _inTab(ListingModel l) => _inTabIndex(_tab, l);
+
+  bool _inTabIndex(int tab, ListingModel l) {
+    switch (tab) {
       case 0:
         return l.isLive;
       case 1:
@@ -61,13 +63,14 @@ class _State extends ConsumerState<AgentListingsScreen> {
   Widget build(BuildContext context) {
     final uid = ref.watch(currentUserIdProvider);
     final async = uid == null ? null : ref.watch(agentListingsProvider(uid));
+    final all = async?.asData?.value ?? const <ListingModel>[];
     return Scaffold(
       backgroundColor: AppColors.surface,
       body: ListView(padding: EdgeInsets.zero, children: [
         PsGreenHeader(
           padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [const PropsureLogo(light: true, size: 30), const Spacer(), PsButton('Add', expand: false, kind: PsButtonKind.ghost, icon: Icons.add_circle_outline_rounded, onPressed: () => context.push('/listing/new'))]),
+            Row(children: [const PropsureLogo(light: true, size: 30), const Spacer(), PsButton('Add', expand: false, kind: PsButtonKind.onDark, icon: Icons.add_rounded, onPressed: () => context.push('/listing/new'))]),
             const SizedBox(height: 12),
             Text('My listings', style: AppText.display.copyWith(color: Colors.white)),
           ]),
@@ -76,14 +79,19 @@ class _State extends ConsumerState<AgentListingsScreen> {
           padding: kPagePadding,
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const SizedBox(height: 16),
-            SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [for (var i = 0; i < _tabs.length; i++) Padding(padding: const EdgeInsets.only(right: 8), child: PsChip(_tabs[i], selected: _tab == i, onTap: () => setState(() => _tab = i)))])),
+            _TabBar(
+              labels: _tabs,
+              counts: [for (var i = 0; i < _tabs.length; i++) all.where((l) => _inTabIndex(i, l)).length],
+              index: _tab,
+              onChanged: (i) => setState(() => _tab = i),
+            ),
             const SizedBox(height: 16),
             if (async == null)
               const PsEmpty(icon: Icons.lock_outline_rounded, title: 'Sign in', message: 'Sign in to manage your listings.')
             else
               async.when(
                 loading: () => const Column(children: [PsListingSkeleton()]),
-                error: (_, __) => PsError(onRetry: () => ref.invalidate(agentListingsProvider(uid!))),
+                error: (e, _) => PsError(details: e, onRetry: () => ref.invalidate(agentListingsProvider(uid!))),
                 data: (all) {
                   final list = all.where(_inTab).toList();
                   if (list.isEmpty) {
@@ -169,6 +177,12 @@ class _Card extends ConsumerWidget {
           ),
           if (l.videoStatus == VideoStatus.needsReview)
             Padding(padding: const EdgeInsets.only(top: 10), child: PsNote('Your video frames are ready to review.', icon: Icons.photo_library_outlined, tone: PsTone.warning)),
+          if (l.videoStatus == VideoStatus.ready && l.stills.any((x) => x.source == 'video') && !l.stills.any((x) => x.source == 'video' && (x.label ?? '').trim().isNotEmpty))
+            Padding(padding: const EdgeInsets.only(top: 10), child: Row(children: [
+              const Icon(Icons.meeting_room_outlined, size: 20, color: AppColors.primary),
+              const SizedBox(width: 8),
+              Flexible(child: PsLink('Name the rooms in your video', onTap: () => context.push('/listing/${l.id}/frames'))),
+            ])),
           const Divider(height: 24),
           Row(children: [
             PsLink('Edit', onTap: () => context.push('/listing/edit/${l.id}')),
@@ -194,6 +208,56 @@ class _Card extends ConsumerWidget {
             )),
         ]),
       ),
+    );
+  }
+}
+
+
+/// Four equal tabs that always fit the screen, each with a live count.
+class _TabBar extends StatelessWidget {
+  final List<String> labels;
+  final List<int> counts;
+  final int index;
+  final ValueChanged<int> onChanged;
+  const _TabBar({required this.labels, required this.counts, required this.index, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(color: AppColors.muted, borderRadius: BorderRadius.circular(AppRadius.md + 2)),
+      child: Row(children: [
+        for (var i = 0; i < labels.length; i++)
+          Expanded(
+            child: Semantics(
+              button: true,
+              selected: i == index,
+              label: '${labels[i]}, ${counts[i]}',
+              excludeSemantics: true,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                onTap: () => onChanged(i),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  height: 48,
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  decoration: BoxDecoration(color: i == index ? AppColors.primary : Colors.transparent, borderRadius: BorderRadius.circular(AppRadius.md)),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Text(labels[i], style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: i == index ? Colors.white : AppColors.text)),
+                      if (counts[i] > 0) ...[
+                        const SizedBox(width: 5),
+                        Text('${counts[i]}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: i == index ? Colors.white70 : AppColors.text3)),
+                      ],
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ]),
     );
   }
 }

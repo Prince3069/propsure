@@ -34,15 +34,11 @@ class _State extends ConsumerState<ChatListScreen> {
     final uid = ref.watch(currentUserIdProvider);
     return Scaffold(
       backgroundColor: AppColors.surface,
-      body: SafeArea(
-        child: uid == null
-            ? PsEmpty(icon: Icons.chat_bubble_outline_rounded, title: 'Sign in to see your messages', message: 'Your conversations with agents will appear here.', actionLabel: 'Sign in', onAction: () => context.push('/auth?reason=message&redirect=/messages'))
-            : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
-                  child: Row(children: [const PropsureLogo(size: 32), const Spacer(), Text('A safer way\nto find home', textAlign: TextAlign.right, style: AppText.caption)]),
-                ),
-                Padding(padding: const EdgeInsets.fromLTRB(24, 16, 24, 8), child: Text('Inbox', style: AppText.display)),
+      body: uid == null
+          ? SafeArea(child: PsEmpty(icon: Icons.chat_bubble_outline_rounded, title: 'Sign in to see your messages', message: 'Your conversations with agents will appear here.', actionLabel: 'Sign in', onAction: () => context.push('/auth?reason=message&redirect=/messages')))
+          : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const PsTabHeader('Inbox', subtitle: 'A safer way to find home.'),
+                const SizedBox(height: 16),
                 Padding(
                   padding: kPagePadding,
                   child: TextField(
@@ -53,7 +49,6 @@ class _State extends ConsumerState<ChatListScreen> {
                 Padding(padding: const EdgeInsets.fromLTRB(24, 12, 24, 8), child: PsSegmented(labels: const ['Messages', 'Inspection updates'], index: _tab, onChanged: (i) => setState(() => _tab = i))),
                 Expanded(child: _tab == 0 ? _messages(uid) : _inspections(uid)),
               ]),
-      ),
     );
   }
 
@@ -61,7 +56,7 @@ class _State extends ConsumerState<ChatListScreen> {
     final async = ref.watch(userChatsProvider(uid));
     return async.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (_, __) => PsError(onRetry: () => ref.invalidate(userChatsProvider(uid))),
+      error: (e, _) => PsError(details: e, onRetry: () => ref.invalidate(userChatsProvider(uid))),
       data: (all) {
         final chats = all.where((c) => !c.isArchived).where((c) => _q.isEmpty || c.otherParticipantName(uid).toLowerCase().contains(_q) || (c.listingTitle ?? '').toLowerCase().contains(_q)).toList();
         if (chats.isEmpty) {
@@ -118,7 +113,7 @@ class _State extends ConsumerState<ChatListScreen> {
     final async = (user?.isAgent ?? false) ? ref.watch(agentBookingsProvider(uid)) : ref.watch(userBookingsProvider(uid));
     return async.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (_, __) => PsError(onRetry: () => ref.invalidate(userBookingsProvider(uid))),
+      error: (e, _) => PsError(details: e, onRetry: () => ref.invalidate(userBookingsProvider(uid))),
       data: (list) {
         if (list.isEmpty) return const PsEmpty(icon: Icons.event_outlined, title: 'No inspection updates', message: 'Requests and confirmations will show up here.');
         return ListView(padding: const EdgeInsets.fromLTRB(24, 0, 24, 24), children: [

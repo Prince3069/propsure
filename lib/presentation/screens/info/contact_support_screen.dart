@@ -8,7 +8,7 @@ import '../../../core/constants/app_theme.dart';
 import '../../../core/widgets/common_widgets.dart';
 import '../../../services/functions_service.dart';
 import '../../providers/app_providers.dart';
-import '../bulk_upload/whatsapp_bot_screen.dart' show kWhatsAppAssistNumber;
+import '../bulk_upload/whatsapp_bot_screen.dart' show openWhatsApp;
 
 const String kSupportEmail = 'support@propsure.africa';
 
@@ -127,7 +127,7 @@ class _SupportState extends ConsumerState<SupportScreen> {
         Text('Other ways to get help', style: AppText.title),
         const SizedBox(height: 8),
         Row(children: [
-          Expanded(child: PsButton('WhatsApp', kind: PsButtonKind.outline, icon: Icons.chat_rounded, onPressed: () => launchUrl(Uri.parse('https://wa.me/$kWhatsAppAssistNumber'), mode: LaunchMode.externalApplication))),
+          Expanded(child: PsButton('WhatsApp', kind: PsButtonKind.outline, icon: Icons.chat_rounded, onPressed: () => openWhatsApp(context, ref.read(whatsappAssistNumberProvider), 'Hi Propsure, I need help.'))),
           const SizedBox(width: 12),
           Expanded(child: PsButton('Email', kind: PsButtonKind.outline, icon: Icons.mail_outline_rounded, onPressed: () => launchUrl(Uri(scheme: 'mailto', path: kSupportEmail)))),
         ]),

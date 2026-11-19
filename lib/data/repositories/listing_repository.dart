@@ -1,14 +1,16 @@
-import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:uuid/uuid.dart';
 import '../models/listing_model.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/listing_category.dart';
+import '../../core/utils/city.dart';
 import '../../core/utils/listing_ranking.dart';
 import '../../core/utils/move_in_cost.dart';
+import 'dart:typed_data';
+import 'package:image_picker/image_picker.dart';
+import '../../core/utils/upload.dart';
 
 /// Fields an owner may change directly. Mirrors firestore.rules exactly.
 /// Everything trust- or payment-related (status, passport, featured,
@@ -76,6 +78,7 @@ class ListingRepository {
   /// Applies the filters Firestore cannot express, to an already-fetched set.
   static List<ListingModel> applyClientFilters(List<ListingModel> input, ListingFilter f) {
     var items = input;
+    if (f.city != null) items = items.where((l) => listingInCity(l, f.city!)).toList();
     if (f.minPrice != null && f.minPrice! > 0) items = items.where((l) => l.price >= f.minPrice!).toList();
     if (f.maxPrice != null) items = items.where((l) => l.price <= f.maxPrice!).toList();
     if (f.maxMoveIn != null) {
@@ -118,7 +121,7 @@ class ListingRepository {
     if (filter.area != null) query = query.where('area', isEqualTo: filter.area);
     if (filter.propertyType != null) query = query.where('propertyType', isEqualTo: filter.propertyType);
     if (filter.category != null) {
-      query = query.where('category', isEqualTo: ListingCategory.fromAny(filter.category).value);
+      query = query.where('category', whereIn: ListingCategory.fromAny(filter.category).storedVariants);
     }
     if (filter.isFeatured == true) query = query.where('isFeatured', isEqualTo: true);
     return query;
@@ -147,7 +150,7 @@ class ListingRepository {
     if (startAfter != null) query = query.startAfterDocument(startAfter);
 
     final snap = await query.get();
-    var items = applyClientFilters(snap.docs.map(ListingModel.fromFirestore).toList(), filter);
+    var items = applyClientFilters(parseDocs(snap.docs), filter);
     if (filter.sortOrder != SortOrder.priceAsc && filter.sortOrder != SortOrder.priceDesc) {
       items.sort(compareListingsByRank);
     }
@@ -158,22 +161,38 @@ class ListingRepository {
     );
   }
 
+  /// Parses documents one by one: a single malformed document is skipped
+  /// (and logged) instead of making the whole list fail.
+  static List<ListingModel> parseDocs(Iterable<DocumentSnapshot> docs) {
+    final out = <ListingModel>[];
+    for (final d in docs) {
+      try {
+        out.add(ListingModel.fromFirestore(d));
+      } catch (e) {
+        debugPrint('Skipped listing ${d.id}: $e');
+      }
+    }
+    return out;
+  }
+
   /// The agent's own inventory — every status, newest first.
   Stream<List<ListingModel>> watchAgentListings(String agentId) => _col
       .where('agentId', isEqualTo: agentId)
       .snapshots()
-      .map((s) => s.docs.map(ListingModel.fromFirestore).toList()..sort((a, b) => b.createdAt.compareTo(a.createdAt)));
+      .map((s) => parseDocs(s.docs)..sort((a, b) => b.createdAt.compareTo(a.createdAt)));
 
   /// Public listings by one agent (profile page).
   Stream<List<ListingModel>> watchAgentPublicListings(String agentId) => _col
       .where('agentId', isEqualTo: agentId)
       .where('status', isEqualTo: 'active')
       .snapshots()
-      .map((s) => s.docs.map(ListingModel.fromFirestore).toList()..sort(compareListingsByRank));
+      .map((s) => parseDocs(s.docs)..sort(compareListingsByRank));
 
   Stream<List<ListingModel>> watchListings({ListingFilter filter = const ListingFilter(), int limit = 40}) {
+    // No server-side ordering here: older listings may not have `createdAt`, and
+    // ordering would silently drop them. Ranking happens on the device below.
     return _baseQuery(filter).limit(limit).snapshots().map((snap) {
-      var results = applyClientFilters(snap.docs.map(ListingModel.fromFirestore).toList(), filter);
+      var results = applyClientFilters(parseDocs(snap.docs), filter);
       switch (filter.sortOrder) {
         case SortOrder.priceAsc:
           results.sort((a, b) => a.price.compareTo(b.price));
@@ -207,32 +226,27 @@ class ListingRepository {
     return id;
   }
 
-  Future<String> uploadImage(String path, String listingId, int index) async {
-    final file = File(path);
-    if (!await file.exists()) {
-      throw Exception('A photo is no longer on your phone. Please choose it again.');
-    }
+  Future<String> uploadImage(XFile photo, String listingId, int index) async {
     final ref = _storage.ref('listings/images/$listingId/img_${_uuid.v4().substring(0, 8)}_$index.jpg');
-    TaskSnapshot snap;
+    final Uint8List bytes;
     try {
-      final bytes = await FlutterImageCompress.compressWithFile(path, minWidth: 1080, minHeight: 810, quality: 82);
-      snap = (bytes != null && bytes.isNotEmpty)
-          ? await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'))
-          : await ref.putFile(file, SettableMetadata(contentType: 'image/jpeg'));
+      bytes = await compressedImageBytes(photo);
     } catch (_) {
-      snap = await ref.putFile(file, SettableMetadata(contentType: 'image/jpeg'));
+      throw Exception('A photo could not be read. Please choose it again.');
     }
+    final snap = await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
     return snap.ref.getDownloadURL();
   }
 
   /// Uploads the ORIGINAL walkthrough to the private, write-once path. The
   /// media worker (not the app) produces the playable versions and candidate
   /// frames. Returns the upload task so the UI can show real progress.
-  UploadTask uploadOriginalVideo({required String listingId, required String ownerUid, required String path}) {
-    final ext = path.toLowerCase().endsWith('.mov') ? 'mov' : 'mp4';
+  Future<UploadTask> uploadOriginalVideo({required String listingId, required String ownerUid, required XFile video}) {
+    final name = (video.name.isNotEmpty ? video.name : video.path).toLowerCase();
+    final ext = name.endsWith('.mov') ? 'mov' : 'mp4';
     final mime = ext == 'mov' ? 'video/quicktime' : 'video/mp4';
     final ref = _storage.ref('listing_originals/$listingId/${_uuid.v4()}/original.$ext');
-    return ref.putFile(File(path), SettableMetadata(contentType: mime, customMetadata: {'ownerUid': ownerUid}));
+    return putPickedFile(ref, video, SettableMetadata(contentType: mime, customMetadata: {'ownerUid': ownerUid}));
   }
 
   Future<String> candidateUrl(String storagePath) => _storage.ref(storagePath).getDownloadURL();

@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /auth
+Disallow: /workspace
+Disallow: /profile
+Disallow: /messages
+Sitemap: https://propsure.africa/sitemap.xml

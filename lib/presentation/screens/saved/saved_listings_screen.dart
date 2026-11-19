@@ -91,7 +91,7 @@ class _SavedState extends ConsumerState<SavedListingsScreen> {
           const SizedBox(height: 12),
           saved.when(
             loading: () => const PsListingSkeleton(),
-            error: (_, __) => PsError(onRetry: () => ref.invalidate(savedListingsProvider(uid))),
+            error: (e, _) => PsError(details: e, onRetry: () => ref.invalidate(savedListingsProvider(uid))),
             data: (list) {
               if (list.isEmpty) return const PsEmpty(icon: Icons.bookmark_border_rounded, title: 'No saved homes yet', message: 'Tap the bookmark on any home to keep it here.');
               final items = sorted(list);

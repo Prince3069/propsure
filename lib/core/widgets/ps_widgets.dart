@@ -1000,7 +1000,8 @@ class PsEmpty extends StatelessWidget {
   final String message;
   final String? actionLabel;
   final VoidCallback? onAction;
-  const PsEmpty({super.key, required this.icon, required this.title, required this.message, this.actionLabel, this.onAction});
+  final String? footnote;
+  const PsEmpty({super.key, required this.icon, required this.title, required this.message, this.actionLabel, this.onAction, this.footnote});
 
   @override
   Widget build(BuildContext context) {
@@ -1017,6 +1018,10 @@ class PsEmpty extends StatelessWidget {
             const SizedBox(height: 24),
             PsButton(actionLabel!, onPressed: onAction, expand: false),
           ],
+          if (footnote != null) ...[
+            const SizedBox(height: 16),
+            SelectableText(footnote!, textAlign: TextAlign.center, style: AppText.caption.copyWith(color: AppColors.text3)),
+          ],
         ]),
       ),
     );
@@ -1028,16 +1033,22 @@ class PsError extends StatelessWidget {
   final String message;
   final VoidCallback? onRetry;
   final bool offline;
-  const PsError({super.key, this.message = 'Something went wrong. Please try again.', this.onRetry, this.offline = false});
+  /// Technical reason (for example a Firestore error). Shown small under the
+  /// friendly message so a problem can be reported and fixed quickly.
+  final Object? details;
+  const PsError({super.key, this.message = 'Something went wrong. Please try again.', this.onRetry, this.offline = false, this.details});
 
   @override
   Widget build(BuildContext context) {
+    final raw = details?.toString().trim() ?? '';
+    final tech = raw.isEmpty ? null : (raw.length > 220 ? '${raw.substring(0, 220)}…' : raw);
     return PsEmpty(
       icon: offline ? Icons.wifi_off_rounded : Icons.error_outline_rounded,
       title: offline ? "You're offline" : "We couldn't load this",
       message: offline ? 'Check your connection. Saved homes stay available.' : message,
       actionLabel: onRetry == null ? null : 'Try again',
       onAction: onRetry,
+      footnote: (tech != null && !offline) ? 'Details: $tech' : null,
     );
   }
 }
@@ -1154,50 +1165,76 @@ class PsNavBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bg = dark ? const Color(0xFF14141F) : Colors.white;
+    final onColor = dark ? Colors.white : AppColors.primary;
+    final offColor = dark ? const Color(0xFFB8B8C6) : AppColors.text2;
+    final pill = dark ? const Color(0x24FFFFFF) : AppColors.primaryPale;
     return Container(
-      decoration: BoxDecoration(color: bg, border: Border(top: BorderSide(color: dark ? const Color(0xFF2A2A38) : AppColors.border))),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+        border: Border(top: BorderSide(color: dark ? const Color(0xFF2A2A38) : AppColors.border)),
+        boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 20, offset: Offset(0, -6))],
+      ),
       child: SafeArea(
         top: false,
-        child: SizedBox(
-          height: 68,
-          child: Row(children: [
-            for (var i = 0; i < items.length; i++)
-              Expanded(
-                child: Semantics(
-                  button: true,
-                  selected: i == index,
-                  label: items[i].label,
-                  excludeSemantics: true,
-                  child: InkWell(
-                    onTap: () => onTap(i),
-                    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      Stack(clipBehavior: Clip.none, children: [
-                        Icon(i == index ? items[i].activeIcon : items[i].icon,
-                            size: 28,
-                            color: i == index ? (dark ? Colors.white : AppColors.primary) : (dark ? const Color(0xFFB8B8C6) : AppColors.text2)),
-                        if (items[i].dot)
-                          Positioned(
-                            right: -2,
-                            top: -1,
-                            child: Container(
-                              width: 10,
-                              height: 10,
-                              decoration: BoxDecoration(color: AppColors.gold, shape: BoxShape.circle, border: Border.all(color: bg, width: 2)),
-                            ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(6, 8, 6, 6),
+          child: SizedBox(
+            height: 62,
+            child: Row(children: [
+              for (var i = 0; i < items.length; i++)
+                Expanded(
+                  child: Semantics(
+                    button: true,
+                    selected: i == index,
+                    label: items[i].label,
+                    excludeSemantics: true,
+                    child: InkWell(
+                      onTap: () => onTap(i),
+                      borderRadius: BorderRadius.circular(18),
+                      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        Stack(clipBehavior: Clip.none, children: [
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 220),
+                            curve: Curves.easeOutCubic,
+                            width: i == index ? 62 : 40,
+                            height: 32,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(color: i == index ? pill : Colors.transparent, borderRadius: BorderRadius.circular(16)),
+                            child: Icon(i == index ? items[i].activeIcon : items[i].icon, size: 24, color: i == index ? onColor : offColor),
                           ),
+                          if (items[i].dot)
+                            Positioned(
+                              right: i == index ? 8 : 2,
+                              top: 2,
+                              child: Container(
+                                width: 10,
+                                height: 10,
+                                decoration: BoxDecoration(color: AppColors.gold, shape: BoxShape.circle, border: Border.all(color: bg, width: 2)),
+                              ),
+                            ),
+                        ]),
+                        const SizedBox(height: 4),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 2),
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(items[i].label,
+                                maxLines: 1,
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  height: 1.1,
+                                  color: i == index ? onColor : offColor,
+                                  fontWeight: i == index ? FontWeight.w800 : FontWeight.w600,
+                                )),
+                          ),
+                        ),
                       ]),
-                      const SizedBox(height: 4),
-                      Text(items[i].label,
-                          maxLines: 1,
-                          style: AppText.caption.copyWith(
-                            color: i == index ? (dark ? Colors.white : AppColors.primary) : (dark ? const Color(0xFFB8B8C6) : AppColors.text2),
-                            fontWeight: i == index ? FontWeight.w800 : FontWeight.w600,
-                          )),
-                    ]),
+                    ),
                   ),
                 ),
-              ),
-          ]),
+            ]),
+          ),
         ),
       ),
     );

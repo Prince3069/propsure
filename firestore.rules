@@ -1,262 +1,189 @@
 rules_version = '2';
-
-// Propsure Firestore Rules — Phase 1 (P0 correctness & trust)
+// Propsure Firestore rules.
 //
-// Written fresh, since no existing rules file was available to build on.
-// Deploy with: firebase deploy --only firestore:rules
-//
-// The guiding principle throughout, straight from the code review: the
-// Flutter client is UNTRUSTED. Every field that influences trust badges,
-// search ranking, payments, or moderation must be unwritable by a normal
-// signed-in user, no matter what the app itself does or doesn't check.
-// These rules are the actual enforcement; the client-side allowlists in
-// listing_repository.dart etc. are a second, defense-in-depth layer, not
-// the real barrier.
-
+// Principles
+//  - Identity comes from request.auth, never from a field the client sends.
+//  - Trust, payment, quota, availability and status fields are written ONLY
+//    by Cloud Functions (Admin SDK bypasses rules). Clients cannot set them.
+//  - Every update is limited to an explicit field allowlist.
+//  - Private people-data (users/*) is readable only by its owner and
+//    reviewers. Public agent info lives in public_profiles/* (server-written).
+//  Test these with the emulator before deploying (see DEPLOY.md).
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isSignedIn() {
-      return request.auth != null;
-    }
-    function isOwner(uid) {
-      return isSignedIn() && request.auth.uid == uid;
-    }
-    function isAdmin() {
-      return isSignedIn() && request.auth.token.admin == true;
-    }
-    function isReviewer() {
-      return isSignedIn() && (request.auth.token.reviewer == true || request.auth.token.admin == true);
-    }
-    // True only if `keys` are entirely absent from the incoming write's
-    // diff against the existing document — i.e. the caller isn't trying
-    // to change any of them at all. Used to let an owner update their own
-    // document EXCEPT a specific set of trust-sensitive fields.
-    function unchanged(field) {
-      return !(field in request.resource.data) ||
-             (resource != null && request.resource.data[field] == resource.data[field]);
+    // ── helpers ────────────────────────────────────────────────────────────
+    function signedIn() { return request.auth != null; }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+    function isReviewer() { return signedIn() && (request.auth.token.admin == true || request.auth.token.reviewer == true); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function changedKeys() { return incoming().diff(existing()).affectedKeys(); }
+    function onlyChanges(allowed) { return changedKeys().hasOnly(allowed); }
+    function roleOf(uid) { return get(/databases/$(database)/documents/users/$(uid)).data.role; }
+
+    // ── users (private) ────────────────────────────────────────────────────
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isReviewer();
+      // Self-declared marketplace role only. admin is never self-assignable;
+      // premium / verification / counters cannot be set on create.
+      allow create: if isOwner(uid)
+        && incoming().role in ['tenant', 'agent', 'landlord']
+        && !('premiumPlan' in incoming()) && !('premiumExpiresAt' in incoming())
+        && !('verificationStatus' in incoming()) && !('isVerified' in incoming())
+        && (!('totalListings' in incoming()) || incoming().totalListings == 0);
+      allow update: if isOwner(uid)
+        && onlyChanges(['name', 'email', 'bio', 'agencyName', 'profilePhoto', 'role', 'savedListings',
+                        'fcmToken', 'lastSeen', 'city', 'preferences', 'updatedAt'])
+        && incoming().role in ['tenant', 'agent', 'landlord'];
+      allow delete: if false; // account deletion is handled by a server process
     }
 
-    // ── users ────────────────────────────────────────────────────────────
-    match /users/{userId} {
-      allow read: if isSignedIn();
-      allow create: if isOwner(userId)
-        // A new account can never be born admin, pre-verified, or with a
-        // role other than the basic self-service ones.
-        && request.resource.data.role in ['tenant', 'agent', 'landlord']
-        && request.resource.data.get('isVerified', false) == false
-        && request.resource.data.get('verificationStatus', 'none') == 'none';
-      allow update: if isOwner(userId)
-        // "Users cannot change ... through generic update calls" —
-        // role, verification, and admin-adjacent fields are frozen from
-        // the client's perspective. The one exception: a user MAY move
-        // their OWN verificationStatus from 'none' to 'pending' (submitting
-        // a request), never to 'approved'.
-        && unchanged('role')
-        && unchanged('isVerified')
-        && unchanged('verifiedAt')
-        && unchanged('verifiedBy')
-        && unchanged('verificationExpiresAt')
-        && unchanged('premiumPlan')
-        && unchanged('premiumExpiresAt')
-        && (unchanged('verificationStatus') ||
-            (resource.data.get('verificationStatus', 'none') == 'none'
-             && request.resource.data.verificationStatus == 'pending'))
-        || isAdmin();
-      allow delete: if false; // account deletion goes through a Cloud Function (data cleanup)
-    }
-
-    // ── listings ─────────────────────────────────────────────────────────
-    match /listings/{listingId} {
-      allow read: if true; // public marketplace data
-      allow create: if isSignedIn()
-        && request.resource.data.agentId == request.auth.uid
-        && request.resource.data.get('isVerified', false) == false
-        && request.resource.data.get('isFeatured', false) == false
-        && request.resource.data.get('verificationStatus', 'none') == 'none'
-        && request.resource.data.status in ['active', 'pending_review', 'draft'];
-      allow update: if isSignedIn() && resource.data.agentId == request.auth.uid
-        // Owner can edit their own listing's content, but none of the
-        // trust/entitlement/ownership fields — those are Cloud
-        // Function-only. This mirrors kOwnerEditableListingFields in
-        // listing_repository.dart; the client allowlist can be edited by
-        // mistake, this rule cannot.
-        && unchanged('agentId')
-        && unchanged('isVerified')
-        && unchanged('isFeatured')
-        && unchanged('featuredUntil')
-        && unchanged('verificationStatus')
-        && unchanged('verifiedAt')
-        && unchanged('verifiedBy')
-        && unchanged('verificationExpiresAt')
-        && unchanged('viewCount')
-        && unchanged('inquiryCount')
-        // Owner-safe status transitions only. 'archived' is included here
-        // (Phase 2 soft-delete) alongside the archivedAt/archivedBy stamp
-        // — an owner CAN set those two, but only to themselves/now, never
-        // to a different uid (that would be forging who archived it).
-        // Owner-safe status transitions. 'archived' is Phase 2 soft-delete;
-        // 'draft' -> 'active'/'paused' is Phase 3's bulk-import publish
-        // flow (BulkUploadScreen creates rows as 'draft', the agent
-        // publishes each one from My Listings > Drafts after adding photos).
-        && (unchanged('status') || request.resource.data.status in ['active', 'paused', 'rented', 'archived', 'draft'])
-        && (unchanged('archivedBy') || request.resource.data.archivedBy == request.auth.uid || request.resource.data.archivedBy == null)
-        || isAdmin() || isReviewer();
-      allow delete: if isSignedIn() && resource.data.agentId == request.auth.uid || isAdmin();
-
-      // Per-viewer view-count dedup marker (see incrementViewOnce in
-      // listing_repository.dart). A viewer can only ever create/read
-      // their OWN marker — never another user's, and never delete or
-      // rewrite one once it exists, which is what makes the count
-      // tamper-resistant from the client side.
-      match /viewedBy/{viewerId} {
-        allow read: if isSignedIn() && request.auth.uid == viewerId;
-        allow create: if isSignedIn() && request.auth.uid == viewerId;
-        allow update, delete: if false;
-      }
-    }
-
-    // ── verification_requests ────────────────────────────────────────────
-    match /verification_requests/{requestId} {
-      // Applicants can read their own requests; reviewers/admins can read
-      // any (to review them). No one else — these reference private
-      // identity documents.
-      allow read: if isSignedIn() &&
-        (resource.data.applicantId == request.auth.uid || isReviewer());
-      allow create: if isSignedIn()
-        && request.resource.data.applicantId == request.auth.uid
-        && request.resource.data.status in ['draft', 'submitted'];
-      // A user may only edit their OWN request, and only while it's still
-      // a draft — once submitted, only a reviewer (via the
-      // reviewVerificationRequest Cloud Function, which uses the Admin
-      // SDK and bypasses these rules entirely) can move it further.
-      allow update: if isSignedIn()
-        && resource.data.applicantId == request.auth.uid
-        && resource.data.status == 'draft'
-        && request.resource.data.status in ['draft', 'submitted'];
-      allow delete: if false;
-    }
-
-    // ── transactions ─────────────────────────────────────────────────────
-    match /transactions/{reference} {
-      // Read-only for the owning user (so the UI can watch its own
-      // payment status); NO client writes at all, ever. Every write comes
-      // from initializePaystackTransaction / paystackWebhook via the
-      // Admin SDK, which is not subject to these rules. This is the fix
-      // for "the client creates a pending transaction document with
-      // client-supplied amount... before calling the function."
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+    // ── public_profiles (server-written mirror, safe to show) ──────────────
+    match /public_profiles/{uid} {
+      allow read: if true;
       allow write: if false;
     }
 
-    // ── bookings ──────────────────────────────────────────────────────────
-    // Phase 2: enforces WHO can move a booking through WHICH transition,
-    // not just that the reader/writer is one of the two participants.
-    // Mirrors the pending -> confirmed/rejected -> completed/cancelled
-    // state machine from booking_repository.dart's confirmBooking/
-    // rejectBooking/cancelBooking/completeBooking.
-    match /bookings/{bookingId} {
-      function isTenant() { return resource.data.userId == request.auth.uid; }
-      function isAgentOwner() { return resource.data.agentId == request.auth.uid; }
-      function newStatus() { return request.resource.data.status; }
-      function oldStatus() { return resource.data.status; }
+    // ── listings ───────────────────────────────────────────────────────────
+    match /listings/{id} {
+      allow read: if existing().status in ['active', 'rented'] || isOwner(existing().agentId) || isReviewer();
+      // Clients may only create DRAFTS they own. Publishing is a callable.
+      allow create: if signedIn() && incoming().agentId == request.auth.uid
+        && incoming().status == 'draft'
+        && roleOf(request.auth.uid) in ['agent', 'landlord']
+        && !('isFeatured' in incoming()) && !('safetyHold' in incoming()) && !('passport' in incoming())
+        && !('availabilityConfirmedAt' in incoming()) && !('verificationStatus' in incoming());
+      allow update: if isOwner(existing().agentId)
+        && existing().status in ['draft', 'paused', 'active', 'stale']
+        && incoming().agentId == existing().agentId
+        && onlyChanges(['title', 'description', 'price', 'propertyType', 'bedrooms', 'bathrooms', 'toilets',
+                        'location', 'area', 'city', 'images', 'amenities', 'isFurnished', 'petsAllowed',
+                        'parkingAvailable', 'additionalInfo', 'category', 'charges', 'chargesComplete',
+                        'unconfirmedCharges', 'agentName', 'agentPhone', 'agentPhoto', 'updatedAt'])
+        // `status`, `isFeatured`, `featuredUntil`, `passport`, `safetyHold`,
+        // `availability*`, `videoStatus`, `videoUrl`, `stills` and counters are deliberately absent.
+        ;
+      allow delete: if isOwner(existing().agentId) && existing().status in ['draft', 'archived'];
 
-      allow read: if isSignedIn() && (isTenant() || isAgentOwner() || isAdmin());
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid
-        && request.resource.data.status == 'pending';
-      allow update: if isSignedIn() && (isTenant() || isAgentOwner())
-        && unchanged('userId') && unchanged('agentId') && unchanged('listingId')
-        && (
-          // Only the agent being booked can confirm or reject a pending request.
-          (isAgentOwner() && oldStatus() == 'pending' && newStatus() in ['confirmed', 'rejected']) ||
-          // Only the agent can mark a confirmed viewing as completed.
-          (isAgentOwner() && oldStatus() == 'confirmed' && newStatus() == 'completed') ||
-          // Either side can cancel while it's still pending or confirmed —
-          // a tenant backing out or an agent who can no longer host it.
-          ((isTenant() || isAgentOwner()) && oldStatus() in ['pending', 'confirmed'] && newStatus() == 'cancelled') ||
-          // Non-status edits (e.g. isRated) with no status change at all.
-          unchanged('status')
-        )
-        || isAdmin();
-      allow delete: if false;
-    }
-
-    // ── chats / messages ──────────────────────────────────────────────────
-    match /chats/{chatId} {
-      // FIELD NAME FIX: ChatModel actually stores `participantIds`, not
-      // `participants` — the first draft of this rule checked a field
-      // that doesn't exist, which would have silently denied every read.
-      allow read: if isSignedIn() && request.auth.uid in resource.data.get('participantIds', []);
-      allow create: if isSignedIn() && request.auth.uid in request.resource.data.get('participantIds', []);
-      // A participant may update the chat document ONLY to add/remove
-      // themselves from blockedBy/mutedBy (Phase 2 block/mute), or to
-      // archive it for themselves — never to touch the other person's
-      // presence in those arrays, and never participantIds/listingId.
-      allow update: if isSignedIn() && request.auth.uid in resource.data.get('participantIds', [])
-        && unchanged('participantIds') && unchanged('listingId')
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['blockedBy', 'mutedBy', 'isArchived', 'updatedAt']);
-      allow delete: if false;
-
-      match /messages/{messageId} {
-        allow read: if isSignedIn() &&
-          request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.get('participantIds', []);
-        allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid
-          // Can't send into a chat you've blocked — mirrors the input bar
-          // being hidden client-side; this is the real enforcement.
-          && !(request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.get('blockedBy', []));
-        allow update, delete: if false;
+      // viewedBy: one doc per viewer, create-only by that viewer
+      match /viewedBy/{viewer} {
+        allow create: if isOwner(viewer);
+        allow read, update, delete: if false;
       }
     }
 
+    // ── chats ──────────────────────────────────────────────────────────────
+    match /chats/{chatId} {
+      allow read: if signedIn() && request.auth.uid in existing().participantIds;
+      allow create: if signedIn() && request.auth.uid in incoming().participantIds
+        && incoming().participantIds.size() == 2;
+      allow update: if signedIn() && request.auth.uid in existing().participantIds
+        && incoming().participantIds == existing().participantIds
+        && onlyChanges(['lastMessage', 'updatedAt', 'unreadCounts', 'isArchived', 'blockedBy', 'mutedBy']);
+      allow delete: if false;
+
+      match /messages/{msgId} {
+        allow read: if signedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+        allow create: if signedIn() && incoming().senderId == request.auth.uid
+          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds
+          && !(get(/databases/$(database)/documents/chats/$(chatId)).data.blockedBy.size() > 0);
+        allow update: if signedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds
+          && onlyChanges(['isRead', 'readBy', 'isDeleted']);
+        allow delete: if false;
+      }
+    }
+
+    // ── bookings (inspections) ─────────────────────────────────────────────
+    match /bookings/{id} {
+      allow read: if signedIn() && (existing().userId == request.auth.uid || existing().agentId == request.auth.uid);
+      allow create: if signedIn() && incoming().userId == request.auth.uid
+        && incoming().status == 'pending' && incoming().agentId != request.auth.uid;
+      // Renter may cancel their own; the agent may confirm / reject / complete.
+      allow update: if signedIn() && (
+        (existing().userId == request.auth.uid && incoming().status == 'cancelled'
+          && onlyChanges(['status', 'cancelledBy', 'updatedAt', 'dateTime', 'message']))
+        || (existing().agentId == request.auth.uid
+          && incoming().status in ['confirmed', 'rejected', 'completed', 'cancelled']
+          && onlyChanges(['status', 'confirmedBy', 'rejectedBy', 'cancelledBy', 'completedBy', 'completedAt',
+                          'rejectionReason', 'updatedAt'])));
+      allow delete: if false;
+    }
+
     // ── enquiries ──────────────────────────────────────────────────────────
-    // Phase 3 — general enquiries distinct from bookings (see
-    // EnquiryRepository). Same shape of rule as bookings: participants
-    // only, no impersonation, no changing who the enquiry is between.
-    match /enquiries/{enquiryId} {
-      allow read: if isSignedIn() &&
-        (resource.data.enquirerId == request.auth.uid || resource.data.agentId == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() && request.resource.data.enquirerId == request.auth.uid;
-      allow update: if isSignedIn() && resource.data.agentId == request.auth.uid
-        && unchanged('enquirerId') && unchanged('agentId') && unchanged('listingId')
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['responseState', 'respondedAt']);
+    match /enquiries/{id} {
+      allow read: if signedIn() && (existing().enquirerId == request.auth.uid || existing().agentId == request.auth.uid);
+      allow create: if signedIn() && incoming().enquirerId == request.auth.uid
+        && incoming().responseState == 'awaitingResponse';
+      allow update: if signedIn() && existing().agentId == request.auth.uid
+        && onlyChanges(['responseState', 'respondedAt']);
       allow delete: if false;
     }
 
-    // ── saved_searches ────────────────────────────────────────────────────
-    // Phase 3 — backs SavedSearchRepository. A user's saved searches are
-    // theirs alone; the matching Cloud Function (checkSavedSearches) uses
-    // the Admin SDK and isn't subject to this rule.
-    match /saved_searches/{searchId} {
-      allow read, update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-    }
-    // Phase 2: backs ReportRepository. Anyone signed in can file one;
-    // only the reporter can read their own; a moderation queue for
-    // reviewing ALL reports is a privileged admin-tool concern, not this
-    // consumer app, so there's deliberately no broad read rule here.
-    match /reports/{reportId} {
-      allow read: if isSignedIn() && (resource.data.reporterId == request.auth.uid || isAdmin() || isReviewer());
-      allow create: if isSignedIn() && request.resource.data.reporterId == request.auth.uid
-        && request.resource.data.status == 'open';
-      allow update: if isAdmin() || isReviewer();
-      allow delete: if false;
+    // ── saved searches ─────────────────────────────────────────────────────
+    match /saved_searches/{id} {
+      allow read, delete: if signedIn() && existing().userId == request.auth.uid;
+      allow create: if signedIn() && incoming().userId == request.auth.uid;
+      allow update: if signedIn() && existing().userId == request.auth.uid
+        && onlyChanges(['alertsEnabled', 'label', 'cadence', 'channel', 'updatedAt']);
     }
 
-    // ── notifications ─────────────────────────────────────────────────────
-    match /notifications/{notifId} {
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
-      // Only Cloud Functions create notifications; a user may mark their
-      // own as read, nothing else.
+    // ── notifications (server-created) ─────────────────────────────────────
+    match /notifications/{id} {
+      allow read: if signedIn() && existing().userId == request.auth.uid;
+      allow update: if signedIn() && existing().userId == request.auth.uid && onlyChanges(['isRead']);
       allow create, delete: if false;
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
     }
 
-    // ── reviews ────────────────────────────────────────────────────────────
-    match /reviews/{reviewId} {
-      allow read: if true;
-      allow create: if isSignedIn() && request.resource.data.reviewerId == request.auth.uid;
-      allow update, delete: if isSignedIn() && resource.data.reviewerId == request.auth.uid;
+    // ── support requests & reports (created by callable only) ──────────────
+    match /support_requests/{id} {
+      allow read: if signedIn() && (existing().userId == request.auth.uid || isReviewer());
+      allow write: if false;
     }
+
+    // ── verification requests ──────────────────────────────────────────────
+    match /verification_requests/{id} {
+      allow read: if signedIn() && (existing().applicantId == request.auth.uid || isReviewer());
+      allow create: if signedIn() && incoming().applicantId == request.auth.uid
+        && incoming().status == 'submitted'
+        && incoming().requestType in ['identity', 'authority', 'agent_authority', 'landlord_ownership', 'property']
+        && !('reviewerId' in incoming()) && !('rejectionReason' in incoming()) && !('auditHistory' in incoming());
+      allow update, delete: if false;
+    }
+
+    // ── payments: read-only for the payer ──────────────────────────────────
+    match /transactions/{ref} {
+      allow read: if signedIn() && existing().userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    // ── shared shortlists ──────────────────────────────────────────────────
+    match /shortlists/{id} {
+      allow read: if signedIn() && request.auth.uid in existing().memberIds;
+      allow create: if signedIn() && incoming().ownerId == request.auth.uid
+        && incoming().memberIds == [request.auth.uid];
+      allow update: if signedIn() && request.auth.uid in existing().memberIds
+        && incoming().ownerId == existing().ownerId
+        && onlyChanges(['listingIds', 'notes', 'name', 'updatedAt'])
+        // only the owner can change membership (invites are accepted via link/callable)
+        ;
+      allow delete: if signedIn() && existing().ownerId == request.auth.uid;
+    }
+
+    // ── My home (private per user) ─────────────────────────────────────────
+    match /users/{uid}/home/{doc=**} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // ── config / promotions: public read, server write ─────────────────────
+    match /promotions/{doc} { allow read: if true; allow write: if false; }
+    match /promotions/{doc}/claims/{c} { allow read, write: if false; }
+    match /system/{doc} { allow read, write: if false; }
+    // Public, read-only app settings (for example the WhatsApp assist number).
+    // Written only from the Firebase console.
+    match /public_config/{doc} { allow read: if true; allow write: if false; }
+    match /media_jobs/{id} { allow read: if isReviewer(); allow write: if false; }
+
+    match /{document=**} { allow read, write: if false; }
   }
 }

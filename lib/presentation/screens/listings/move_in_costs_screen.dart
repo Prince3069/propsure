@@ -40,7 +40,7 @@ class MoveInCostsScreen extends ConsumerWidget {
       appBar: const PsTopBar(backLabel: 'Back'),
       body: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, __) => PsError(onRetry: () => ref.invalidate(listingByIdProvider(listingId))),
+        error: (e, _) => PsError(details: e, onRetry: () => ref.invalidate(listingByIdProvider(listingId))),
         data: (l) {
           if (l == null) return const PsEmpty(icon: Icons.home_work_outlined, title: 'Home not found', message: 'This listing may have been removed.');
           final b = MoveInBreakdown.of(l);

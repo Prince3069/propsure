@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
@@ -14,9 +15,14 @@ import '../../../core/widgets/common_widgets.dart';
 import '../../../data/models/listing_model.dart';
 import '../../providers/actions.dart';
 import '../../providers/app_providers.dart';
+import '../../providers/city_provider.dart';
 
 /// Map search. Pins show annual rent and sit at each listing's APPROXIMATE
 /// location; exact addresses are not shown on the map.
+/// The website only shows the map when the Google Maps script (with a web API
+/// key) is added to web/index.html and the build uses --dart-define=MAPS_WEB=true.
+const bool kMapsOnWeb = bool.fromEnvironment('MAPS_WEB', defaultValue: false);
+
 class MapScreen extends ConsumerStatefulWidget {
   const MapScreen({super.key});
   @override
@@ -85,6 +91,19 @@ class _MapState extends ConsumerState<MapScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (kIsWeb && !kMapsOnWeb) {
+      return Scaffold(
+        backgroundColor: AppColors.surface,
+        appBar: PsTopBar(title: 'Map', onBack: () => context.canPop() ? context.pop() : context.go('/home')),
+        body: PsEmpty(
+          icon: Icons.map_outlined,
+          title: 'The map is on the app',
+          message: 'On the website you can browse homes in a list. Use the Propsure app to see them on a map.',
+          actionLabel: 'See homes in a list',
+          onAction: () => context.pushReplacement('/search'),
+        ),
+      );
+    }
     final filter = ref.watch(listingFilterProvider);
     final async = ref.watch(filteredListingsProvider(filter));
     final list = async.asData?.value ?? const <ListingModel>[];
@@ -115,22 +134,22 @@ class _MapState extends ConsumerState<MapScreen> {
             borderRadius: BorderRadius.circular(AppRadius.lg),
             child: InkWell(
               borderRadius: BorderRadius.circular(AppRadius.lg),
-              onTap: () => context.push('/search'),
+              onTap: () => context.pushReplacement('/search'),
               child: Padding(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12), child: Row(children: [
                 const Icon(Icons.search_rounded, color: AppColors.primary),
                 const SizedBox(width: 10),
-                Expanded(child: Text(filter.area != null ? '${filter.area}, Abuja' : 'Search Abuja', style: AppText.title)),
+                Expanded(child: Text(filter.area != null ? '${filter.area}, ${ref.watch(selectedCityProvider)}' : 'Search ${ref.watch(selectedCityProvider)}', style: AppText.title)),
                 IconButton(tooltip: 'Filters', onPressed: () => context.push('/search/filters'), icon: const Icon(Icons.tune_rounded, color: AppColors.primary)),
               ])),
             ),
           ),
           const SizedBox(height: 10),
           Align(alignment: Alignment.centerLeft, child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
-            _Pill(filter.category == null ? 'Rent' : ListingCategoryLabel.of(filter.category!), true, () => context.push('/search/filters')),
+            _Pill(filter.category == null ? 'All homes' : ListingCategoryLabel.of(filter.category!), filter.category != null, () => context.push('/search/filters')),
             const SizedBox(width: 8),
             _Pill(filter.minBedrooms == null ? 'Beds' : '${filter.minBedrooms}+ beds', false, () => context.push('/search/filters')),
             const SizedBox(width: 8),
-            _Pill(filter.maxMoveIn != null ? 'Up to ${Money.short(filter.maxMoveIn!.round())}' : 'Move-in budget', false, () => context.push('/search/filters')),
+            _Pill(filter.maxMoveIn != null ? 'Up to ${Money.short(filter.maxMoveIn!.round())}' : 'Budget', false, () => context.push('/search/filters')),
           ]))),
         ]))),
         Positioned(

@@ -1,7 +1,7 @@
 {
   "name": "propsure-functions",
   "description": "Cloud Functions for Propsure — payments, listings lifecycle, trust, support, media",
-  "engines": { "node": "22" },
+  "engines": { "node": "20" },
   "main": "index.js",
   "scripts": {
     "serve": "firebase emulators:start --only functions,firestore",

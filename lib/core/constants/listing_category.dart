@@ -24,6 +24,22 @@ enum ListingCategory {
     }
   }
 
+  /// Every spelling of this category that may exist in Firestore. Older
+  /// documents stored the display label ("For Rent"), so server-side
+  /// searches must match all of these, not just [value].
+  List<String> get storedVariants {
+    switch (this) {
+      case ListingCategory.rent:
+        return const ['for_rent', 'For Rent', 'Rent', 'rent'];
+      case ListingCategory.sale:
+        return const ['for_sale', 'For Sale', 'Sale', 'sale'];
+      case ListingCategory.shortStay:
+        return const ['short_stay', 'Short Stay', 'Short stay', 'short-stay'];
+      case ListingCategory.commercial:
+        return const ['commercial', 'Commercial'];
+    }
+  }
+
   /// Human-readable label for UI only.
   String get label {
     switch (this) {

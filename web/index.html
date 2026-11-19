@@ -1,38 +1,48 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
-  -->
   <base href="$FLUTTER_BASE_HREF">
-
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <!-- iOS meta tags & icons -->
+  <title>Propsure · Homes you can see before you visit</title>
+  <meta name="description" content="Walk through real video tours, see the full cost to move in, and know what the video did not show. Rent and buy homes in Nigeria.">
+  <meta name="theme-color" content="#0F4C3A">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Propsure">
+  <meta property="og:title" content="Propsure · Homes you can see before you visit">
+  <meta property="og:description" content="Real video tours, honest move-in costs, and a check on who you are paying.">
+  <meta name="twitter:card" content="summary">
+
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="propsure">
+  <meta name="apple-mobile-web-app-title" content="Propsure">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
-
-  <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
-
-  <title>propsure</title>
   <link rel="manifest" href="manifest.json">
+
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"WebSite","name":"Propsure","description":"Nigeria's property marketplace with real video tours and honest move-in costs."}
+  </script>
+
+  <!--
+    MAP ON THE WEBSITE (optional). Add your Google Maps JavaScript API key
+    (restrict it to your website domain) and build with
+    --dart-define=MAPS_WEB=true . Without it the website shows the list view.
+  <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_WEB_MAPS_KEY"></script>
+  -->
+
+  <style>
+    html,body{margin:0;background:#F8F6F0}
+    #splash{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:system-ui,sans-serif;color:#0F4C3A;gap:12px}
+    #splash b{font-size:28px;letter-spacing:-0.5px}
+  </style>
 </head>
 <body>
+  <div id="splash"><b>Propsure</b><span>Homes you can see before you visit</span></div>
+  <noscript>Propsure needs JavaScript. Please turn it on, or use the Propsure app.</noscript>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

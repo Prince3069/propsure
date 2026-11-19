@@ -145,6 +145,29 @@ exports.confirmVideoFrames = functions.https.onCall(async (data, context) => {
   return { success: true, stills: stills.length };
 });
 
+// The agent renames the rooms on stills that are already published
+// (for example "Kitchen"). Only the label text can change here.
+exports.updateStillLabels = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Please sign in first.');
+  const { listingId, labels } = data || {};
+  if (!listingId || !Array.isArray(labels)) throw new functions.https.HttpsError('invalid-argument', 'listingId and labels are required.');
+  const ref = db.collection('listings').doc(String(listingId));
+  const snap = await ref.get();
+  if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Listing not found.');
+  const listing = snap.data();
+  if (listing.agentId !== context.auth.uid) throw new functions.https.HttpsError('permission-denied', 'This is not your listing.');
+  const byUrl = new Map();
+  for (const item of labels.slice(0, 40)) {
+    if (item && typeof item.url === 'string') {
+      const text = typeof item.label === 'string' ? item.label.trim().slice(0, 24) : '';
+      byUrl.set(item.url, text || null);
+    }
+  }
+  const stills = (Array.isArray(listing.stills) ? listing.stills : []).map((s) => (byUrl.has(s.url) ? { ...s, label: byUrl.get(s.url) } : s));
+  await ref.update({ stills, updatedAt: FieldValue.serverTimestamp() });
+  return { success: true };
+});
+
 // The agent rejects the processed video (wrong clip, private content…).
 exports.discardVideo = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Please sign in first.');

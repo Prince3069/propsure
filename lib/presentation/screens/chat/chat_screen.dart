@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -57,7 +56,7 @@ class _State extends ConsumerState<ChatScreen> {
     final x = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 80, maxWidth: 1600);
     if (x == null || !mounted) return;
     await runAction(context, () => ref.read(chatRepositoryProvider).sendImageMessage(
-          chatId: chat.id, senderId: uid, senderName: name, senderPhoto: photo, imageFile: File(x.path), participantIds: chat.participantIds));
+          chatId: chat.id, senderId: uid, senderName: name, senderPhoto: photo, imageFile: x, participantIds: chat.participantIds));
   }
 
   Future<void> _requestInspection(ChatModel chat, String uid) async {
@@ -162,7 +161,7 @@ class _State extends ConsumerState<ChatScreen> {
           Expanded(
             child: msgs.when(
               loading: () => const Center(child: CircularProgressIndicator()),
-              error: (_, __) => PsError(onRetry: () => ref.invalidate(chatMessagesProvider(widget.chatId))),
+              error: (e, _) => PsError(details: e, onRetry: () => ref.invalidate(chatMessagesProvider(widget.chatId))),
               data: (list) {
                 if (list.isEmpty) return Center(child: Padding(padding: const EdgeInsets.all(32), child: Text('Ask about availability, the full move-in cost or a viewing time.', textAlign: TextAlign.center, style: AppText.bodyMuted)));
                 return ListView.builder(

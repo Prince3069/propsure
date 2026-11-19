@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -135,9 +134,9 @@ class _SubmitState extends ConsumerState<_SubmitScreen> {
             uid: uid,
             requestType: widget.type,
             listingId: _listingId,
-            selfie: _selfie == null ? null : File(_selfie!.path),
-            idDocument: _id == null ? null : File(_id!.path),
-            propertyDocument: _doc == null ? null : File(_doc!.path),
+            selfie: _selfie,
+            idDocument: _id,
+            propertyDocument: _doc,
           );
       if (!mounted) return;
       showPsSnack(context, 'Submitted. We will review it and tell you the result.');

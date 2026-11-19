@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_theme.dart';
+import '../../../core/constants/rooms.dart';
 import '../../../core/widgets/common_widgets.dart';
 import '../../../data/models/listing_model.dart';
 import '../../providers/actions.dart';
@@ -60,6 +61,16 @@ class _State extends ConsumerState<VideoFrameReviewScreen> {
     if (ok && mounted) context.pop();
   }
 
+  Widget _coverageNote(ListingModel l) {
+    final labels = [for (final id in _chosen) _labels[id] ?? ''];
+    final cov = coverageFromLabels(labels, bedrooms: l.bedrooms, bathrooms: l.bathrooms, propertyType: l.propertyType, commercial: l.category == 'commercial');
+    if (cov == null) {
+      return const PsNote('Name the rooms and renters can jump straight to them in the video.', icon: Icons.meeting_room_outlined);
+    }
+    if (cov.missing.isEmpty) return PsNote('Every area is covered: ${cov.total} of ${cov.total}.', tone: PsTone.success, icon: Icons.check_circle_outline_rounded);
+    return PsNote('Not shown yet: ${cov.missing.map((m) => m.label).join(', ')}. Renters will see these as "not shown".', tone: PsTone.warning, icon: Icons.warning_amber_rounded);
+  }
+
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(listingByIdProvider(widget.listingId));
@@ -68,7 +79,7 @@ class _State extends ConsumerState<VideoFrameReviewScreen> {
       appBar: const PsTopBar(title: 'Review your video stills'),
       body: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, __) => PsError(onRetry: () => ref.invalidate(listingByIdProvider(widget.listingId))),
+        error: (e, _) => PsError(details: e, onRetry: () => ref.invalidate(listingByIdProvider(widget.listingId))),
         data: (l) {
           if (l == null) return const PsEmpty(icon: Icons.videocam_off_outlined, title: 'Listing not found', message: 'This listing may have been removed.');
           if (l.videoStatus == VideoStatus.uploaded || l.videoStatus == VideoStatus.validating || l.videoStatus == VideoStatus.processing) {
@@ -82,6 +93,9 @@ class _State extends ConsumerState<VideoFrameReviewScreen> {
               actionLabel: 'Add real photos',
               onAction: () => context.push('/listing/edit/${l.id}'),
             );
+          }
+          if (l.videoStatus == VideoStatus.ready && l.stills.any((x) => x.source == 'video')) {
+            return _ReadyLabeler(listing: l);
           }
           if (l.videoStatus != VideoStatus.needsReview) {
             return const PsEmpty(icon: Icons.check_circle_outline_rounded, title: 'Nothing to review', message: 'There are no frames waiting for your review.');
@@ -155,14 +169,23 @@ class _State extends ConsumerState<VideoFrameReviewScreen> {
               ),
             ),
             const SizedBox(height: 12),
+            Text('Which room is this?', style: AppText.title),
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final r in roomChoices(bedrooms: l.bedrooms, bathrooms: l.bathrooms))
+                PsChip(r, selected: (_labels[focus.id] ?? '') == r, onTap: () => setState(() { _labels[focus.id] = r; _chosen.add(focus.id); })),
+            ]),
+            const SizedBox(height: 12),
             PsField(
-              key: ValueKey('label_${focus.id}'),
-              label: 'Room name (optional)',
-              hint: 'Living room, Kitchen, Bedroom…',
+              key: ValueKey('label_${focus.id}_${_labels[focus.id] ?? ''}'),
+              label: 'Or type a name (optional)',
+              hint: 'Study, Store, Balcony…',
               maxLength: 24,
               initialValue: _labels[focus.id],
               onChanged: (v) => _labels[focus.id] = v,
             ),
+            const SizedBox(height: 12),
+            _coverageNote(l),
             const SizedBox(height: 12),
             Row(children: [
               Expanded(child: PsButton(_cover == focus.id ? 'Cover frame' : 'Set as cover', icon: Icons.bookmark_rounded, onPressed: () => setState(() { _cover = focus.id; _chosen.add(focus.id); }))),
@@ -181,5 +204,64 @@ class _State extends ConsumerState<VideoFrameReviewScreen> {
         },
       ),
     );
+  }
+}
+
+
+/// For a video that is already published: name the rooms on its stills.
+class _ReadyLabeler extends ConsumerStatefulWidget {
+  final ListingModel listing;
+  const _ReadyLabeler({required this.listing});
+  @override
+  ConsumerState<_ReadyLabeler> createState() => _ReadyLabelerState();
+}
+
+class _ReadyLabelerState extends ConsumerState<_ReadyLabeler> {
+  late final Map<String, String> _labels = {for (final s in widget.listing.stills.where((x) => x.source == 'video')) s.url: s.label ?? ''};
+  bool _busy = false;
+
+  String _fmt(int? ms) {
+    if (ms == null) return '';
+    final s = ms ~/ 1000;
+    return '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _save() async {
+    setState(() => _busy = true);
+    final ok = await runAction(context, () => ref.read(functionsServiceProvider).updateStillLabels(listingId: widget.listing.id, labels: Map<String, String>.from(_labels)), success: 'Room names saved.');
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (ok) context.pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = widget.listing;
+    final stills = l.stills.where((s) => s.source == 'video').toList();
+    final cov = coverageFromLabels(_labels.values.toList(), bedrooms: l.bedrooms, bathrooms: l.bathrooms, propertyType: l.propertyType, commercial: l.category == 'commercial');
+    return ListView(padding: const EdgeInsets.fromLTRB(AppSpace.gutter, 0, AppSpace.gutter, 24), children: [
+      const PsHeadline('Name the rooms.', accent: 'Renters jump to them.'),
+      const SizedBox(height: 8),
+      Text('Pick the room each still shows. Renters get tappable chapters in your video, and a list of what it shows.', style: AppText.bodyMuted),
+      const SizedBox(height: 16),
+      for (final s in stills) ...[
+        PsCard(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            ClipRRect(borderRadius: BorderRadius.circular(AppRadius.md), child: AspectRatio(aspectRatio: 16 / 9, child: PsNetImage(s.url, semanticLabel: 'Still from your video at ${_fmt(s.timestampMs)}'))),
+            const SizedBox(height: 10),
+            Text('${_labels[s.url]!.isEmpty ? 'Not named' : _labels[s.url]!}${s.timestampMs != null ? ' · ${_fmt(s.timestampMs)}' : ''}', style: AppText.title),
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final r in roomChoices(bedrooms: l.bedrooms, bathrooms: l.bathrooms))
+                PsChip(r, selected: _labels[s.url] == r, onTap: () => setState(() => _labels[s.url] = _labels[s.url] == r ? '' : r)),
+            ]),
+          ]),
+        ),
+        const SizedBox(height: 12),
+      ],
+      if (cov != null && cov.missing.isNotEmpty) PsNote('Not shown yet: ${cov.missing.map((m) => m.label).join(', ')}. Renters will see these as "not shown".', tone: PsTone.warning, icon: Icons.warning_amber_rounded),
+      const SizedBox(height: 14),
+      PsButton('Save room names', loading: _busy, onPressed: _save),
+    ]);
   }
 }

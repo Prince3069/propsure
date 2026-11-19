@@ -31,7 +31,8 @@ class _WorkspaceState extends ConsumerState<WorkspaceScreen> {
     if (uid == null) {
       return Scaffold(backgroundColor: AppColors.surface, body: SafeArea(child: PsEmpty(icon: Icons.work_outline_rounded, title: 'Sign in to open your workspace', message: 'Manage listings, leads and inspections in one place.', actionLabel: 'Sign in', onAction: () => context.push('/auth?redirect=/workspace'))));
     }
-    final listings = ref.watch(agentListingsProvider(uid)).asData?.value ?? const <ListingModel>[];
+    final listingsAsync = ref.watch(agentListingsProvider(uid));
+    final listings = listingsAsync.asData?.value ?? const <ListingModel>[];
     final bookings = ref.watch(_agentBookingsProvider(uid)).asData?.value ?? const [];
     final enquiries = ref.watch(agentEnquiriesProvider(uid)).asData?.value ?? const <EnquiryModel>[];
 
@@ -44,10 +45,10 @@ class _WorkspaceState extends ConsumerState<WorkspaceScreen> {
 
     final shown = listings.where((l) => _tab == 0 ? l.isLive : _tab == 1 ? l.isDraft : l.status == 'paused').take(3).toList();
 
-    Widget stat(IconData icon, Color bg, Color fg, String label, int n, String route) => Expanded(child: PsCard(onTap: () => context.go(route), semanticLabel: '$label $n', padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Widget stat(IconData icon, Color bg, Color fg, String label, int n, String route) => Expanded(child: PsCard(onTap: () => context.go(route), semanticLabel: '${label.replaceAll('\n', ' ')} $n', padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Container(width: 48, height: 48, decoration: BoxDecoration(color: bg, shape: BoxShape.circle), child: Icon(icon, color: fg)),
           const SizedBox(height: 10),
-          Text(label, style: AppText.small),
+          SizedBox(width: double.infinity, child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(label, maxLines: 2, style: AppText.small))),
           Row(children: [Expanded(child: Text('$n', style: AppText.h1.copyWith(fontSize: 30))), const Icon(Icons.chevron_right_rounded, size: 20)]),
         ])));
 
@@ -66,7 +67,7 @@ class _WorkspaceState extends ConsumerState<WorkspaceScreen> {
           padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
           child: SafeArea(bottom: false, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const SizedBox(height: 10),
-            Row(children: [const PropsureLogo(light: true), const Spacer(), PsAvatar(url: user?.profilePhoto, name: user?.name ?? 'A', size: 44)]),
+            Row(children: [const PropsureLogo(light: true), const Spacer(), Container(padding: const EdgeInsets.all(2), decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle), child: PsAvatar(url: user?.profilePhoto, name: user?.name ?? 'A', size: 40))]),
             const SizedBox(height: 18),
             Text('AGENT WORKSPACE', style: AppText.caption.copyWith(color: Colors.white70, letterSpacing: 2)),
             const SizedBox(height: 6),
@@ -80,11 +81,11 @@ class _WorkspaceState extends ConsumerState<WorkspaceScreen> {
         ),
         Padding(padding: const EdgeInsets.fromLTRB(24, 16, 24, 24), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            stat(Icons.chat_bubble_outline_rounded, AppColors.primaryPale, AppColors.primary, 'New enquiries', newEnq, '/leads'),
+            stat(Icons.chat_bubble_outline_rounded, AppColors.primaryPale, AppColors.primary, 'New\nenquiries', newEnq, '/leads'),
             const SizedBox(width: 10),
-            stat(Icons.event_outlined, AppColors.warningPale, AppColors.goldDark, 'Inspections today', todayInspections, '/leads'),
+            stat(Icons.event_outlined, AppColors.warningPale, AppColors.goldDark, 'Inspections\ntoday', todayInspections, '/leads'),
             const SizedBox(width: 10),
-            stat(Icons.sync_rounded, AppColors.errorPale, AppColors.error, 'Needs refresh', needsRefresh.length, '/my-listings'),
+            stat(Icons.sync_rounded, AppColors.errorPale, AppColors.error, 'Needs\nrefresh', needsRefresh.length, '/my-listings'),
           ]),
           const SizedBox(height: 22),
           Row(children: [Expanded(child: Text('Today’s priorities', style: AppText.h2)), PsLink('See all', onTap: () => context.go('/leads'), underline: false)]),
@@ -97,7 +98,9 @@ class _WorkspaceState extends ConsumerState<WorkspaceScreen> {
           const SizedBox(height: 10),
           PsSegmented(labels: const ['Active', 'Drafts', 'Paused'], index: _tab, onChanged: (i) => setState(() => _tab = i)),
           const SizedBox(height: 12),
-          if (shown.isEmpty) Text(_tab == 1 ? 'No drafts.' : _tab == 2 ? 'Nothing paused.' : 'No active listings yet.', style: AppText.bodyMuted),
+          if (listingsAsync.hasError)
+            PsNote('Your listings could not be loaded. Open the Listings tab and tap Try again.\n${listingsAsync.error}', icon: Icons.error_outline_rounded, tone: PsTone.warning)
+          else if (shown.isEmpty) Text(_tab == 1 ? 'No drafts.' : _tab == 2 ? 'Nothing paused.' : 'No active listings yet.', style: AppText.bodyMuted),
           for (final l in shown) Padding(padding: const EdgeInsets.only(bottom: 10), child: PsCard(padding: const EdgeInsets.all(10), onTap: () => context.push(l.isDraft ? '/listing/edit/${l.id}' : '/listing/${l.id}'), semanticLabel: l.title, child: Row(children: [
             ClipRRect(borderRadius: BorderRadius.circular(AppRadius.sm), child: SizedBox(width: 110, height: 96, child: PsNetImage(l.coverUrl))),
             const SizedBox(width: 12),

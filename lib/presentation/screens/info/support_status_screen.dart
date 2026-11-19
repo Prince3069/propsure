@@ -31,7 +31,7 @@ class SupportStatusScreen extends ConsumerWidget {
       appBar: const PsTopBar(title: 'Support request'),
       body: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, __) => PsError(onRetry: () => ref.invalidate(_latestSupportProvider)),
+        error: (e, _) => PsError(details: e, onRetry: () => ref.invalidate(_latestSupportProvider)),
         data: (r) {
           if (r == null) {
             return PsEmpty(icon: Icons.support_agent_rounded, title: 'No requests yet', message: 'When you contact support, you can follow it here.', actionLabel: 'Get help', onAction: () => context.push('/support'));

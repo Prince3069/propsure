@@ -9,6 +9,9 @@ import '../../presentation/screens/auth/welcome_screen.dart';
 import '../../presentation/screens/shell/main_shell.dart';
 import '../../presentation/screens/home/home_screen.dart';
 import '../../presentation/screens/search/search_screen.dart';
+import '../../presentation/screens/area/area_report_screen.dart';
+import '../../presentation/screens/area/area_screen.dart';
+import '../../presentation/screens/safety/account_check_screen.dart';
 import '../../presentation/screens/search/filters_screen.dart';
 import '../../presentation/screens/map/map_screen.dart';
 import '../../presentation/screens/tours/tours_screen.dart';
@@ -78,6 +81,8 @@ const _authRoutes = <String>[
   '/my-home',
   '/support',
   '/shortlist',
+  '/check-account',
+  '/area/report',
 ];
 
 bool _needsAuth(String loc) {
@@ -87,23 +92,52 @@ bool _needsAuth(String loc) {
 }
 
 class _RouterNotifier extends ChangeNotifier {
-  bool isSignedIn = false;
+  bool isSignedIn = FirebaseAuth.instance.currentUser != null;
+  bool isAgent = (Hive.box('settings_box').get('lastRoleAgent', defaultValue: false) as bool) && FirebaseAuth.instance.currentUser != null;
   _RouterNotifier(Ref ref) {
     ref.listen(firebaseAuthUserProvider, (_, next) {
+      // Until Firebase reports, trust the synchronous currentUser above.
+      if (!next.hasValue) return;
       final v = next.asData?.value != null;
       if (v != isSignedIn) {
         isSignedIn = v;
+        if (!v) {
+          isAgent = false;
+          Hive.box('settings_box').put('lastRoleAgent', false);
+        }
+        notifyListeners();
+      }
+    }, fireImmediately: true);
+    // The role arrives a moment after sign-in. When it changes the router
+    // re-checks the current page, so an agent is moved from the renter
+    // Discover page to their Workspace instead of seeing two home screens.
+    ref.listen(currentUserModelProvider, (_, next) {
+      if (!next.hasValue) return;
+      final loaded = next.asData?.value;
+      if (loaded == null && isSignedIn) return; // profile not loaded yet
+      final v = loaded?.isAgent ?? false;
+      // Remember the role so the next cold start opens the right home at once.
+      if (loaded != null) Hive.box('settings_box').put('lastRoleAgent', v);
+      if (v != isAgent) {
+        isAgent = v;
         notifyListeners();
       }
     }, fireImmediately: true);
   }
 }
 
+String _initialLocation() {
+  final box = Hive.box('settings_box');
+  final signedIn = FirebaseAuth.instance.currentUser != null;
+  if (signedIn && (box.get('lastRoleAgent', defaultValue: false) as bool)) return '/workspace';
+  return (box.get('welcomeSeen', defaultValue: false) as bool) || signedIn ? '/home' : '/welcome';
+}
+
 final appRouterProvider = Provider<GoRouter>((ref) {
   final notifier = _RouterNotifier(ref);
 
   return GoRouter(
-    initialLocation: (Hive.box('settings_box').get('welcomeSeen', defaultValue: false) as bool) || FirebaseAuth.instance.currentUser != null ? '/home' : '/welcome',
+    initialLocation: _initialLocation(),
     refreshListenable: notifier,
     redirect: (context, state) {
       final loc = state.matchedLocation;
@@ -112,7 +146,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         return '/auth?redirect=${Uri.encodeComponent(state.uri.toString())}';
       }
       if (notifier.isSignedIn && loc == '/auth') {
-        return state.uri.queryParameters['redirect'] ?? '/home';
+        return state.uri.queryParameters['redirect'] ?? (notifier.isAgent ? '/workspace' : '/home');
+      }
+      // One home per role: agents land on their Workspace. They can still
+      // browse as a renter from Account ("/home?as=renter"), which is left alone.
+      if (loc == '/home' && notifier.isSignedIn && notifier.isAgent && state.uri.queryParameters['as'] != 'renter') {
+        return '/workspace';
       }
       return null;
     },
@@ -152,7 +191,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(path: '/search/filters', builder: (_, __) => const FiltersScreen()),
+      GoRoute(path: '/payment/callback', builder: (_, s) => PaymentCallbackScreen(reference: s.uri.queryParameters['reference'] ?? s.uri.queryParameters['trxref'])),
       GoRoute(path: '/map', builder: (_, __) => const MapScreen()),
+      GoRoute(path: '/check-account', builder: (_, s) => AccountCheckScreen(listingId: s.uri.queryParameters['listing'])),
+      GoRoute(
+        path: '/area',
+        builder: (_, s) => AreaScreen(city: s.uri.queryParameters['city'] ?? '', area: s.uri.queryParameters['area'] ?? ''),
+      ),
+      GoRoute(
+        path: '/area/report',
+        builder: (_, s) => AreaReportScreen(city: s.uri.queryParameters['city'] ?? '', area: s.uri.queryParameters['area'] ?? ''),
+      ),
 
       // Listing
       GoRoute(path: '/listing/new', builder: (_, __) => const AddListingScreen()),

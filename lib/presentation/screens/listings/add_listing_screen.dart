@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,6 +15,7 @@ import '../../../services/functions_service.dart';
 import '../../../services/location_service.dart';
 import '../../providers/actions.dart';
 import '../../providers/app_providers.dart';
+import '../../../core/utils/upload.dart';
 
 /// One screen for "Add a home" and "Edit home" (same components, as in the
 /// mockups). New homes go Media → Details → Costs → Review. Editing shows the
@@ -112,7 +112,7 @@ class _State extends ConsumerState<AddListingScreen> {
     try {
       final x = await ImagePicker().pickVideo(source: src, maxDuration: const Duration(minutes: 5));
       if (x == null) return;
-      final size = await File(x.path).length();
+      final size = await x.length();
       if (size > 300 * 1024 * 1024) {
         setState(() => _error = 'That video is larger than 300 MB. Choose a shorter walkthrough.');
         return;
@@ -253,7 +253,7 @@ class _State extends ConsumerState<AddListingScreen> {
       final urls = <String>[];
       for (var i = 0; i < _newPhotos.length; i++) {
         setState(() { _progressLabel = 'Uploading photo ${i + 1} of ${_newPhotos.length}…'; _progress = i / (_newPhotos.length + (_video != null ? 1 : 0)); });
-        urls.add(await repo.uploadImage(_newPhotos[i].path, id, i));
+        urls.add(await repo.uploadImage(_newPhotos[i], id, i));
       }
       if (urls.isNotEmpty) {
         _existingImages.addAll(urls);
@@ -264,7 +264,7 @@ class _State extends ConsumerState<AddListingScreen> {
       // video original → private path; the media worker does the rest
       bool videoSent = false;
       if (_video != null) {
-        final task = repo.uploadOriginalVideo(listingId: id, ownerUid: user.uid, path: _video!.path);
+        final task = await repo.uploadOriginalVideo(listingId: id, ownerUid: user.uid, video: _video!);
         task.snapshotEvents.listen((s) {
           if (!mounted || s.totalBytes == 0) return;
           setState(() { _progress = s.bytesTransferred / s.totalBytes; _progressLabel = 'Uploading your walkthrough… ${(100 * s.bytesTransferred / s.totalBytes).round()}%'; });
@@ -412,7 +412,7 @@ class _State extends ConsumerState<AddListingScreen> {
           height: 96,
           child: ListView(scrollDirection: Axis.horizontal, children: [
             for (var i = 0; i < _existingImages.length; i++) _thumb(PsNetImage(_existingImages[i], width: 96, height: 96, radius: BorderRadius.circular(12)), () => setState(() { _existingImages.removeAt(i); _dirty = true; })),
-            for (var i = 0; i < _newPhotos.length; i++) _thumb(ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.file(File(_newPhotos[i].path), width: 96, height: 96, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox(width: 96, height: 96))), () => setState(() { _newPhotos.removeAt(i); _dirty = true; })),
+            for (var i = 0; i < _newPhotos.length; i++) _thumb(ClipRRect(borderRadius: BorderRadius.circular(12), child: XFileImage(_newPhotos[i], width: 96, height: 96)), () => setState(() { _newPhotos.removeAt(i); _dirty = true; })),
           ]),
         ),
       const SizedBox(height: 8),

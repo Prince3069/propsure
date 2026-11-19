@@ -1,13 +1,35 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/app_theme.dart';
 import '../../../core/widgets/common_widgets.dart';
+import '../../providers/app_providers.dart';
 
-/// Number of the Propsure WhatsApp assist line. Replace with the approved
-/// WhatsApp Business number before launch (see DEPLOY.md).
-const String kWhatsAppAssistNumber = '14155238886';
+/// The WhatsApp number is NOT stored in the app. Set it in the Firebase
+/// console (Firestore > public_config > app > whatsappAssistNumber) and it
+/// works at once, with no new build.
+Uri? whatsAppUri(String? number, [String? text]) {
+  if (number == null) return null;
+  return Uri.parse('https://wa.me/$number${text == null ? '' : '?text=${Uri.encodeComponent(text)}'}');
+}
+
+Future<void> openWhatsApp(BuildContext context, String? number, [String? text]) async {
+  final uri = whatsAppUri(number, text);
+  if (uri == null) {
+    showPsSnack(context, 'Our WhatsApp line is not open yet. Please use the app or email us.');
+    return;
+  }
+  var ok = false;
+  try {
+    ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } catch (_) {}
+  if (!ok && context.mounted) {
+    await Clipboard.setData(ClipboardData(text: '+$number'));
+    if (context.mounted) showPsSnack(context, 'Could not open WhatsApp. The number was copied.');
+  }
+}
 
 const String _format = '''For rent: 2-bedroom flat
 Area: Gwarinpa, Abuja
@@ -17,11 +39,12 @@ Video attached''';
 
 /// Assisted pilot: the agent sends a walkthrough video and details; we
 /// prepare a DRAFT. Nothing goes live until the agent confirms it in the app.
-class WhatsAppAssistScreen extends StatelessWidget {
+class WhatsAppAssistScreen extends ConsumerWidget {
   const WhatsAppAssistScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final number = ref.watch(whatsappAssistNumberProvider);
     Widget step(String n, IconData icon, String label) => Expanded(
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
@@ -74,10 +97,12 @@ class WhatsAppAssistScreen extends StatelessWidget {
           if (context.mounted) showPsSnack(context, 'Message format copied');
         }),
         const SizedBox(height: 12),
-        PsButton('Open WhatsApp', trailingIcon: Icons.arrow_forward_rounded, icon: Icons.chat_rounded, onPressed: () async {
-          final ok = await launchUrl(Uri.parse('https://wa.me/$kWhatsAppAssistNumber?text=${Uri.encodeComponent('Hi Propsure, I would like to list a home.')}'), mode: LaunchMode.externalApplication);
-          if (!ok && context.mounted) showPsSnack(context, 'Could not open WhatsApp.');
-        }),
+        if (number == null) ...[
+          const PsNote('Our WhatsApp line is not open yet. You can list in the app now: add a video and details, and review the draft before it goes live.', icon: Icons.info_outline_rounded, tone: PsTone.warning),
+          const SizedBox(height: 12),
+          PsButton('List in the app instead', icon: Icons.add_rounded, onPressed: () => context.push('/listing/new')),
+        ] else
+          PsButton('Open WhatsApp', trailingIcon: Icons.arrow_forward_rounded, icon: Icons.chat_rounded, onPressed: () => openWhatsApp(context, number, 'Hi Propsure, I would like to list a home.')),
         const SizedBox(height: 12),
         Center(child: Text('Assisted pilot · by permission', style: AppText.caption)),
         const SizedBox(height: 8),
