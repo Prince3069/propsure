@@ -119,6 +119,7 @@ class _DetailState extends ConsumerState<ListingDetailScreen> {
                     for (final a in l.amenities.where((a) => a == 'Borehole / Water' || a == 'Prepaid Meter').take(2)) _Fact(a == 'Prepaid Meter' ? Icons.credit_card_outlined : Icons.water_drop_outlined, a == 'Borehole / Water' ? 'Water' : 'Prepaid meter'),
                   ])),
                   if (l.hasVideo && coverage != null) ...[const SizedBox(height: 14), CoverageCard(coverage: coverage)],
+                  if (l.hasVideo && l.stills.any((x) => x.source == 'video')) ...[const SizedBox(height: 8), Text('Video and frames are the agent\'s own, lightly brightened and steadied. Nothing added.', style: AppText.caption)],
                   const SizedBox(height: 14),
                   AreaPreviewCard(city: l.location.city.isNotEmpty ? l.location.city : l.location.state, area: l.location.area),
                   const SizedBox(height: 14),

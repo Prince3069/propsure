@@ -1,22 +1,22 @@
 /// Time-of-day greeting, based on the clock of the device the user is holding
 /// (so it is correct in whatever city or time zone they are in; no location
 /// permission is needed).
-enum DayPeriod { morning, afternoon, evening }
+enum DayPart { morning, afternoon, evening }
 
-DayPeriod dayPeriodAt(DateTime t) {
+DayPart dayPeriodAt(DateTime t) {
   final h = t.hour;
-  if (h >= 5 && h < 12) return DayPeriod.morning;
-  if (h >= 12 && h < 17) return DayPeriod.afternoon;
-  return DayPeriod.evening;
+  if (h >= 5 && h < 12) return DayPart.morning;
+  if (h >= 12 && h < 17) return DayPart.afternoon;
+  return DayPart.evening;
 }
 
-String greetingFor(DayPeriod p) {
+String greetingFor(DayPart p) {
   switch (p) {
-    case DayPeriod.morning:
+    case DayPart.morning:
       return 'Good morning';
-    case DayPeriod.afternoon:
+    case DayPart.afternoon:
       return 'Good afternoon';
-    case DayPeriod.evening:
+    case DayPart.evening:
       return 'Good evening';
   }
 }

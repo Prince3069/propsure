@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'video_status_banner.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/app_theme.dart';
@@ -373,20 +374,14 @@ class _State extends ConsumerState<AddListingScreen> {
   }
 
   Widget _media() {
-    final hasStills = _existing?.videoStatus == VideoStatus.needsReview;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text('Start with your walkthrough', style: AppText.display.copyWith(fontSize: 30)),
       const SizedBox(height: 8),
       Text('A single video helps renters understand your home. We suggest real frames from it for you to review.', style: AppText.bodyMuted),
-      const SizedBox(height: 16),
-      if (hasStills) ...[
-        PsNote('Your video is ready. Review the suggested frames before they are shown.', icon: Icons.photo_library_outlined),
-        const SizedBox(height: 8),
-        PsButton('Review video stills', kind: PsButtonKind.outline, onPressed: () => context.push('/listing/${_existing!.id}/frames')),
-        const SizedBox(height: 16),
-      ],
-      if (_existing != null && _existing!.videoStatus != VideoStatus.none && !hasStills)
-        Padding(padding: const EdgeInsets.only(bottom: 12), child: PsNote('Video status: ${_existing!.videoStatus.name}', icon: Icons.videocam_outlined)),
+      const SizedBox(height: 6),
+      PsLink('How to film a perfect tour', onTap: () => context.push('/listing/record-guide')),
+      const SizedBox(height: 14),
+      if (_existing != null) VideoStatusBanner(listingId: _existing!.id),
       Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(borderRadius: BorderRadius.circular(AppRadius.lg), border: Border.all(color: AppColors.border2, width: 1.4)),

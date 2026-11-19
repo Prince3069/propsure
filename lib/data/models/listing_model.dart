@@ -218,12 +218,34 @@ class VideoCandidate {
   final String id;
   final String path;
   final int timestampMs;
-  const VideoCandidate({required this.id, required this.path, required this.timestampMs});
+  /// Which space of the walk-through this frame belongs to (0, 1, 2…).
+  final int scene;
+  /// `wide` (the main view of the space) or `detail` (another view of it).
+  final String role;
+  const VideoCandidate({required this.id, required this.path, required this.timestampMs, this.scene = 0, this.role = 'wide'});
 
   factory VideoCandidate.fromMap(Map<String, dynamic> m) => VideoCandidate(
         id: m['id'] as String? ?? '',
         path: m['path'] as String? ?? '',
         timestampMs: (m['timestampMs'] as num?)?.toInt() ?? 0,
+        scene: (m['scene'] as num?)?.toInt() ?? 0,
+        role: m['role'] as String? ?? 'wide',
+      );
+}
+
+/// Something to film again, with the moment it happens in the video.
+class VideoIssue {
+  final String type; // dark | bright | fast | short
+  final int fromMs;
+  final int toMs;
+  final String tip;
+  const VideoIssue({required this.type, required this.fromMs, required this.toMs, required this.tip});
+
+  factory VideoIssue.fromMap(Map<String, dynamic> m) => VideoIssue(
+        type: m['type'] as String? ?? '',
+        fromMs: (m['fromMs'] as num?)?.toInt() ?? 0,
+        toMs: (m['toMs'] as num?)?.toInt() ?? 0,
+        tip: m['tip'] as String? ?? '',
       );
 }
 
@@ -271,6 +293,9 @@ class ListingModel {
   final VideoStatus videoStatus;
   final String? videoRejectionReason;
   final List<VideoCandidate> videoCandidates;
+  final List<VideoIssue> videoIssues;
+  final bool videoSteadied;
+  final bool videoNeedsCheck;
   final String? videoCoverageWarning;
   final List<ListingStill> stills;
   final String? video360Url; // legacy field — never shown; no 360 support
@@ -336,6 +361,9 @@ class ListingModel {
     this.videoStatus = VideoStatus.none,
     this.videoRejectionReason,
     this.videoCandidates = const [],
+    this.videoIssues = const [],
+    this.videoSteadied = false,
+    this.videoNeedsCheck = false,
     this.videoCoverageWarning,
     this.stills = const [],
     this.video360Url,
@@ -399,6 +427,12 @@ class ListingModel {
           .map((e) => VideoCandidate.fromMap(Map<String, dynamic>.from(e as Map)))
           .toList(),
       // The media worker stores this as true/false; older data may hold text.
+      videoIssues: ((data['videoIssues'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((e) => VideoIssue.fromMap(Map<String, dynamic>.from(e)))
+          .toList(),
+      videoSteadied: data['videoSteadied'] == true,
+      videoNeedsCheck: data['videoNeedsCheck'] == true,
       videoCoverageWarning: data['videoCoverageWarning'] is String
           ? data['videoCoverageWarning'] as String
           : (data['videoCoverageWarning'] == true ? 'This video may not show every room. You can add more photos or record again.' : null),

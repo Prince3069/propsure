@@ -42,6 +42,7 @@ import '../../presentation/screens/bulk_upload/whatsapp_bot_screen.dart';
 import '../../presentation/screens/payment/boost_listing_screen.dart';
 import '../../presentation/screens/payment/premium_screen.dart';
 import '../../presentation/screens/payment/checkout_screen.dart';
+import '../../presentation/screens/listings/record_guide_screen.dart';
 import '../../presentation/screens/financing/rent_calculator_screen.dart';
 import '../../presentation/screens/settings/settings_screen.dart';
 import '../../presentation/screens/home_file/my_home_screen.dart';
@@ -205,6 +206,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
       // Listing
       GoRoute(path: '/listing/new', builder: (_, __) => const AddListingScreen()),
+      GoRoute(path: '/listing/record-guide', builder: (_, __) => const RecordGuideScreen()),
       GoRoute(
         path: '/listing/edit/:id',
         builder: (_, s) => AddListingScreen(editListingId: s.pathParameters['id']),

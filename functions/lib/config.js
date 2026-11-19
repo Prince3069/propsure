@@ -80,7 +80,7 @@ const MEDIA = {
   maxVideoSeconds: 180,
   minVideoSeconds: 5,
   maxImageBytes: 12 * 1024 * 1024,
-  maxStills: 12,
+  maxStills: 20,
   allowedVideoTypes: ['video/mp4', 'video/quicktime', 'video/x-m4v', 'video/3gpp', 'video/webm'],
 };
 

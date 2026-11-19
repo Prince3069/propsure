@@ -1,0 +1,24 @@
+Run these in order. Each step only after the one before finished without errors.
+
+STEP 1  Functions and rules (from the project root, where firebase.json is)
+  cd functions
+  npm install
+  cd ..
+  firebase deploy --only firestore:rules,functions
+  - If it asks to delete any function or index: answer N (No).
+
+STEP 2  Media worker (from the media_worker folder)
+  cd media_worker
+  gcloud run deploy propsure-media-worker --source . --region us-central1 --no-allow-unauthenticated --memory 2Gi --cpu 2 --timeout 900 --concurrency 1 --max-instances 3
+  (Do NOT add --no-cpu-throttling.)
+
+STEP 3  Scheduler time limit. First find the job name:
+  gcloud scheduler jobs list --location us-central1
+  Then, with that name:
+  gcloud scheduler jobs update http JOB_NAME --location us-central1 --attempt-deadline 15m
+
+STEP 4  App: pubspec.yaml is 1.2.0+15
+  flutter pub get
+  flutter analyze
+  flutter build appbundle --release
+  (Web: flutter build web --release, then firebase deploy --only hosting)

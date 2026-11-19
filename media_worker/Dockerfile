@@ -3,6 +3,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -r
 WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev
-COPY analyze.js server.js ./
+COPY analyze.js fingerprint.js server.js ./
 ENV PORT=8080
 CMD ["node", "server.js"]

@@ -185,6 +185,8 @@ service cloud.firestore {
     // Public per-area summaries of resident reports (server-written; raw reports stay private).
     match /area_summaries/{id} { allow read: if true; allow write: if false; }
     match /media_jobs/{id} { allow read: if isReviewer(); allow write: if false; }
+    match /video_fingerprints/{id} { allow read, write: if false; }
+    match /media_flags/{id} { allow read: if isReviewer(); allow write: if false; }
 
     match /{document=**} { allow read, write: if false; }
   }

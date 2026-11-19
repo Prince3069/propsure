@@ -87,8 +87,9 @@ async function publishObject(fromPath, toPath, contentType) {
 exports.confirmVideoFrames = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Please sign in first.');
   const uid = context.auth.uid;
-  const { listingId, frameIds = [], coverId, labels = {} } = data || {};
+  const { listingId, frameIds = [], coverId, labels = {}, privacyConfirmed } = data || {};
   if (!listingId) throw new functions.https.HttpsError('invalid-argument', 'listingId is required.');
+  if (privacyConfirmed !== true) throw new functions.https.HttpsError('failed-precondition', 'Please confirm that no faces, number plates or documents are visible.');
   const listingRef = db.collection('listings').doc(String(listingId));
   const listingSnap = await listingRef.get();
   if (!listingSnap.exists) throw new functions.https.HttpsError('not-found', 'Listing not found.');
@@ -115,7 +116,7 @@ exports.confirmVideoFrames = functions.https.onCall(async (data, context) => {
   let coverUrl = null;
   for (const c of chosen) {
     const url = await publishObject(c.path, `${base}/still_${c.id}.jpg`, 'image/jpeg');
-    const label = typeof labels[c.id] === 'string' ? labels[c.id].slice(0, 24) : null;
+    const label = typeof labels[c.id] === 'string' ? labels[c.id].trim().slice(0, 32) : null;
     stills.push({ url, source: 'video', timestampMs: c.timestampMs, label, jobId: jobSnap.id });
     imageUrls.push(url);
     if (coverId && c.id === coverId) coverUrl = url;
@@ -136,6 +137,8 @@ exports.confirmVideoFrames = functions.https.onCall(async (data, context) => {
     videoUrl, videoLowUrl, posterUrl,
     videoDurationSec: job.durationSec || null,
     videoStatus: 'ready',
+    videoNeedsCheck: false,
+    videoPrivacyConfirmed: true,
     videoCandidates: [],
     videoStatusAt: FieldValue.serverTimestamp(),
     videoRecordedAt: job.recordedAt || FieldValue.serverTimestamp(),
@@ -159,13 +162,39 @@ exports.updateStillLabels = functions.https.onCall(async (data, context) => {
   const byUrl = new Map();
   for (const item of labels.slice(0, 40)) {
     if (item && typeof item.url === 'string') {
-      const text = typeof item.label === 'string' ? item.label.trim().slice(0, 24) : '';
+      const text = typeof item.label === 'string' ? item.label.trim().slice(0, 32) : '';
       byUrl.set(item.url, text || null);
     }
   }
   const stills = (Array.isArray(listing.stills) ? listing.stills : []).map((s) => (byUrl.has(s.url) ? { ...s, label: byUrl.get(s.url) } : s));
   await ref.update({ stills, updatedAt: FieldValue.serverTimestamp() });
   return { success: true };
+});
+
+// The agent removes one published still (wrong room, a person in shot, a bad frame).
+// Only files this listing published for itself can be deleted.
+exports.deleteStill = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Please sign in first.');
+  const { listingId, url } = data || {};
+  if (!listingId || typeof url !== 'string') throw new functions.https.HttpsError('invalid-argument', 'listingId and url are required.');
+  const ref = db.collection('listings').doc(String(listingId));
+  const snap = await ref.get();
+  if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Listing not found.');
+  const listing = snap.data();
+  if (listing.agentId !== context.auth.uid) throw new functions.https.HttpsError('permission-denied', 'This is not your listing.');
+  const stills = Array.isArray(listing.stills) ? listing.stills : [];
+  if (!stills.some((s) => s.url === url)) throw new functions.https.HttpsError('not-found', 'That frame is not on this listing.');
+  const images = (Array.isArray(listing.images) ? listing.images : []).filter((u) => u !== url);
+  if (['active', 'stale'].includes(listing.status) && images.length === 0) {
+    throw new functions.https.HttpsError('failed-precondition', 'A live home needs at least one photo or frame. Add another before removing this one.');
+  }
+  await ref.update({ stills: stills.filter((s) => s.url !== url), images, updatedAt: FieldValue.serverTimestamp() });
+  try {
+    const m = /\/o\/([^?]+)/.exec(url);
+    const objectPath = m ? decodeURIComponent(m[1]) : '';
+    if (objectPath.startsWith(`listings/${listingId}/media/`)) await admin.storage().bucket().file(objectPath).delete();
+  } catch (e) { console.warn('deleteStill: file not removed', e.message); }
+  return { success: true, remaining: images.length };
 });
 
 // The agent rejects the processed video (wrong clip, private content…).

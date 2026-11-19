@@ -67,7 +67,7 @@ final cityOptionsProvider = Provider<List<CityOption>>((ref) {
 
 /// Re-emits the current time of day every minute, so the greeting changes
 /// while the app stays open.
-final dayPeriodProvider = StreamProvider.autoDispose<DayPeriod>((ref) async* {
+final dayPeriodProvider = StreamProvider.autoDispose<DayPart>((ref) async* {
   var last = dayPeriodAt(DateTime.now());
   yield last;
   await for (final _ in Stream<void>.periodic(const Duration(minutes: 1))) {

@@ -122,8 +122,9 @@ class FunctionsService {
     required List<String> frameIds,
     String? coverId,
     Map<String, String> labels = const {},
+    required bool privacyConfirmed,
   }) =>
-      _call('confirmVideoFrames', {'listingId': listingId, 'frameIds': frameIds, 'coverId': coverId, 'labels': labels});
+      _call('confirmVideoFrames', {'listingId': listingId, 'frameIds': frameIds, 'coverId': coverId, 'labels': labels, 'privacyConfirmed': privacyConfirmed});
 
   /// Rename rooms on stills that are already published. [labels] maps still URL → room name.
   Future<void> updateStillLabels({required String listingId, required Map<String, String> labels}) =>
@@ -131,6 +132,10 @@ class FunctionsService {
         'listingId': listingId,
         'labels': [for (final e in labels.entries) {'url': e.key, 'label': e.value}],
       });
+
+  /// Removes one published still from the listing (and its file).
+  Future<void> deleteStill({required String listingId, required String url}) =>
+      _call('deleteStill', {'listingId': listingId, 'url': url});
 
   Future<List<BankOption>> listBanks() async {
     final r = await _call('listBanks');

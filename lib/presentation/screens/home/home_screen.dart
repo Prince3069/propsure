@@ -1,8 +1,7 @@
-import 'package:flutter/material.dart' hide DayPeriod;
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_theme.dart';
-import '../../../core/constants/listing_category.dart';
 import '../../../core/utils/city.dart';
 import '../../../core/utils/format.dart';
 import '../../../core/utils/greeting.dart';
@@ -274,7 +273,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   // ── phone / tablet ─────────────────────────────────────────────────────────
 
-  Widget _phone(BuildContext context, AsyncValue<List<ListingModel>> feed, List<ListingModel> inCity, Set<String> saved, String city, DayPeriod period, String? firstName, ListingModel? tour, bool unread) {
+  Widget _phone(BuildContext context, AsyncValue<List<ListingModel>> feed, List<ListingModel> inCity, Set<String> saved, String city, DayPart period, String? firstName, ListingModel? tour, bool unread) {
     return ListView(padding: EdgeInsets.zero, children: [
       ContentFrame(
         maxWidth: 640,
@@ -312,7 +311,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   // ── desktop ────────────────────────────────────────────────────────────────
 
-  Widget _wide(BuildContext context, AsyncValue<List<ListingModel>> feed, List<ListingModel> inCity, Set<String> saved, String city, DayPeriod period, String? firstName, ListingModel? tour) {
+  Widget _wide(BuildContext context, AsyncValue<List<ListingModel>> feed, List<ListingModel> inCity, Set<String> saved, String city, DayPart period, String? firstName, ListingModel? tour) {
     final width = MediaQuery.sizeOf(context).width;
     final cols = width >= 1180 ? 3 : 2;
     final move = (tour != null && tour.chargesComplete && tour.categoryEnum.hasMoveInCost) ? MoveInBreakdown.of(tour).subtotal : null;
@@ -420,7 +419,7 @@ class _Reel extends StatelessWidget {
 /// scene when the city has no video tour yet.
 class _WideTour extends StatelessWidget {
   final ListingModel? tour;
-  final DayPeriod period;
+  final DayPart period;
   final double? moveIn;
   final VoidCallback? onTap;
   const _WideTour({required this.tour, required this.period, required this.moveIn, required this.onTap});

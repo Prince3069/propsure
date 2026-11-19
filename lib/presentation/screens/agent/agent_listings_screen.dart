@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../listings/tour_score.dart';
 import '../../../core/constants/app_theme.dart';
 import '../../../core/utils/freshness.dart';
 import '../../../core/utils/move_in_cost.dart';
@@ -137,11 +138,9 @@ class _Card extends ConsumerWidget {
 
     Widget primary;
     if (l.isDraft) {
-      primary = Row(mainAxisSize: MainAxisSize.min, children: [
-        PsButton('Finish draft', expand: false, kind: PsButtonKind.outline, onPressed: () => context.push('/listing/edit/${l.id}')),
-        const SizedBox(width: 8),
-        PsButton('Publish', expand: false, onPressed: onPublish),
-      ]);
+      // One clear button. (Two side by side were wider than the card and the
+      // Publish button was cut off the screen.)
+      primary = PsButton('Publish', expand: false, onPressed: onPublish);
     } else if (needsRefresh) {
       primary = PsButton('Confirm availability', expand: false, icon: Icons.check_circle_outline_rounded, onPressed: () => runAction(context, () => ref.read(functionsServiceProvider).confirmAvailability(l.id), success: 'Availability confirmed today.'));
     } else if (l.isLive) {
@@ -176,16 +175,22 @@ class _Card extends ConsumerWidget {
             ]),
           ),
           if (l.videoStatus == VideoStatus.needsReview)
-            Padding(padding: const EdgeInsets.only(top: 10), child: PsNote('Your video frames are ready to review.', icon: Icons.photo_library_outlined, tone: PsTone.warning)),
+            Padding(padding: const EdgeInsets.only(top: 10), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              PsNote('Your video frames are ready to review. Choose your frames, then publish.', icon: Icons.photo_library_outlined, tone: PsTone.warning),
+              const SizedBox(height: 8),
+              PsButton('Review frames', expand: false, icon: Icons.photo_library_outlined, onPressed: () => context.push('/listing/${l.id}/frames')),
+            ])),
           if (l.videoStatus == VideoStatus.ready && l.stills.any((x) => x.source == 'video') && !l.stills.any((x) => x.source == 'video' && (x.label ?? '').trim().isNotEmpty))
             Padding(padding: const EdgeInsets.only(top: 10), child: Row(children: [
               const Icon(Icons.meeting_room_outlined, size: 20, color: AppColors.primary),
               const SizedBox(width: 8),
               Flexible(child: PsLink('Name the rooms in your video', onTap: () => context.push('/listing/${l.id}/frames'))),
             ])),
+          if (l.videoStatus == VideoStatus.ready && l.stills.any((x) => x.source == 'video' && (x.label ?? '').trim().isNotEmpty))
+            Padding(padding: const EdgeInsets.only(top: 10), child: TourScoreNote(listing: l)),
           const Divider(height: 24),
           Row(children: [
-            PsLink('Edit', onTap: () => context.push('/listing/edit/${l.id}')),
+            PsLink(l.isDraft ? 'Edit draft' : 'Edit', onTap: () => context.push('/listing/edit/${l.id}')),
             const SizedBox(width: 12),
             if (l.videoStatus == VideoStatus.needsReview) PsLink('Review frames', onTap: () => context.push('/listing/${l.id}/frames')) else PsLink('Share', onTap: () async { await Clipboard.setData(ClipboardData(text: 'https://propsure.africa/l/${l.id}')); if (context.mounted) showPsSnack(context, 'Link copied.'); }),
             const Spacer(),

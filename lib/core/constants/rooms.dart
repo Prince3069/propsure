@@ -6,6 +6,34 @@ import '../../data/models/listing_model.dart';
 /// labelled a real still from the video with it.
 enum RoomKind { living, dining, kitchen, bedroom, bathroom, compound, other }
 
+/// A still can be named "Kitchen" or "Kitchen · Gas cooker". The part before
+/// the dot is the room; chapters and coverage only look at the room.
+String baseRoomLabel(String label) {
+  final i = label.indexOf('·');
+  return (i < 0 ? label : label.substring(0, i)).trim();
+}
+
+/// Quick "what is this view" choices for a room, so one space can be shown in
+/// several clear pieces (the cooker, then the sink).
+List<String> detailChoices(RoomKind kind) {
+  switch (kind) {
+    case RoomKind.kitchen:
+      return const ['Gas cooker', 'Oven', 'Sink', 'Cabinets', 'Counter', 'Pantry', 'Window'];
+    case RoomKind.living:
+      return const ['Wide view', 'Windows', 'Ceiling', 'Floor', 'TV area', 'Entrance'];
+    case RoomKind.dining:
+      return const ['Wide view', 'Windows', 'Ceiling', 'Floor'];
+    case RoomKind.bedroom:
+      return const ['Wide view', 'Wardrobe', 'Windows', 'Ceiling', 'En-suite'];
+    case RoomKind.bathroom:
+      return const ['Shower', 'Bathtub', 'Toilet', 'Sink', 'Tiles'];
+    case RoomKind.compound:
+      return const ['Front', 'Gate', 'Parking', 'Fence', 'Backyard'];
+    case RoomKind.other:
+      return const ['Wide view', 'Windows', 'Ceiling', 'Floor'];
+  }
+}
+
 RoomKind roomKindOf(String label) {
   final t = label.toLowerCase();
   if (t.contains('living') || t.contains('parlour') || t.contains('parlor') || t.contains('lounge') || t.contains('sitting')) return RoomKind.living;
@@ -50,8 +78,8 @@ List<TourChapter> chaptersOf(ListingModel l) {
     ..sort((a, b) => a.timestampMs!.compareTo(b.timestampMs!));
   final out = <TourChapter>[];
   for (final s in withTime) {
-    final label = s.label!.trim();
-    if (!seen.add(label.toLowerCase())) continue;
+    final label = baseRoomLabel(s.label!);
+    if (label.isEmpty || !seen.add(label.toLowerCase())) continue;
     final start = (s.timestampMs! - 1500) < 0 ? 0 : s.timestampMs! - 1500;
     out.add(TourChapter(label, start, roomKindOf(label)));
   }
@@ -82,7 +110,7 @@ bool _isResidentialType(String propertyType) {
 /// or the agent has labelled no rooms at all, so we do not claim anything).
 VideoCoverage? coverageFromLabels(List<String> labels, {required int bedrooms, required int bathrooms, required String propertyType, required bool commercial}) {
   if (commercial || !_isResidentialType(propertyType)) return null;
-  final named = labels.map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+  final named = labels.map(baseRoomLabel).where((e) => e.isNotEmpty).toList();
   if (named.isEmpty) return null;
   int distinct(RoomKind k) => named.where((n) => roomKindOf(n) == k).map((n) => n.toLowerCase()).toSet().length;
   bool any(RoomKind k) => named.any((n) => roomKindOf(n) == k);
